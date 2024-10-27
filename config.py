@@ -1,19 +1,32 @@
-import psycopg2
+import os
+from dotenv import load_dotenv
 from psycopg2 import pool
+from cryptography.fernet import Fernet
+
+load_dotenv()  # Load environment variables from .env file
 
 class Config:
-    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:admin123@localhost/Upasana"
+    # Load the encryption key and encrypted password from environment variables
+    cipher = Fernet(os.getenv("ENCRYPTION_KEY").encode())
+    ENCRYPTED_PASSWORD = os.getenv("ENCRYPTED_PASSWORD").encode()
+    
+    # Decrypt the password
+    DB_PASSWORD = cipher.decrypt(ENCRYPTED_PASSWORD).decode()
+    
+    SQLALCHEMY_DATABASE_URI = f"postgresql://doadmin:{DB_PASSWORD}@db-postgresql-blr1-14444-do-user-18154576-0.i.db.ondigitalocean.com:25060/defaultdb"
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Database configurationclear
-    DB_HOST = "localhost"
-    DB_PORT = "5432"
-    DB_NAME = "Upasana"
-    DB_USER = "postgres"
-    #Donot change and commit this password
-    DB_PASSWORD = "admin123"
+    # Database configuration
+    DB_HOST = "db-postgresql-blr1-14444-do-user-18154576-0.i.db.ondigitalocean.com"
+    DB_PORT = "25060"
+    DB_NAME = "defaultdb"
+    DB_USER = "doadmin"
+    DB_PASSWORD = DB_PASSWORD
+
     # Create connection pool for better performance
-    connection_pool = pool.SimpleConnectionPool(1, 20,
+    connection_pool = pool.SimpleConnectionPool(
+        1, 20,
         host=DB_HOST,
         port=DB_PORT,
         database=DB_NAME,
