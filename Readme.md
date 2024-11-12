@@ -1,3 +1,11 @@
+**Windows Command**
+flask run --host=0.0.0.0 --port=5000
+**Linux Server command**
+gunicorn app:app -w 4 -b 0.0.0.0:5000
+
+**After changes add new dependencies into requirement.txt**
+pip freeze > requirements.txt
+
 **How to Install required Python libraries**
 **Goto API Folder**
 pip install -r requirements.txt

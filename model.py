@@ -38,6 +38,15 @@ class Booking(db.Model):
     mahaprasad = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
+class Zone(db.Model):
+    __tablename__ = 'Zone'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    area_name = db.Column(db.String(50), nullable=False)
+    pincode = db.Column(db.String(6), nullable=False, unique=True)
+    zone_code = db.Column(db.String(20), nullable=False)  # Zone A, B, or C
+
+
     # Add a string representation for better debugging
     def __repr__(self):
         return f"<Booking {self.id}, User {self.user_id}, Date {self.booking_date}, Zone {self.zone}>"
