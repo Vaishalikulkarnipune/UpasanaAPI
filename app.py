@@ -577,6 +577,24 @@ def login():
             cursor.close()
         if conn is not None:
             conn.close()
+  #get total users and bookings                   
+@app.route('/total_users_and_bookings', methods=['GET'])
+def total_users_and_bookings():
+    # Get total number of registered users
+    total_users = User.query.count()
+
+    # Get total number of bookings
+    total_bookings = Booking.query.count()
+
+    # Get total number of distinct users who have made bookings
+    total_booking_users = db.session.query(Booking.user_id).distinct().count()
+
+    # Return the results as a JSON response
+    return jsonify({
+        "total_users": total_users,
+        "total_bookings": total_bookings,
+        "total_booking_users": total_booking_users
+    }), 200
 
 @app.route('/health')
 def health_check():
