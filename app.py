@@ -557,7 +557,9 @@ def login():
         if conn is not None:
             conn.close()
 
-
+@app.route('/health')
+def health_check():
+    return "Healthy", 200
 
 
 if __name__ == "__main__":
