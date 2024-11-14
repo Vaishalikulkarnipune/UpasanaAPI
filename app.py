@@ -32,19 +32,22 @@ def validate_mobile_number(mobile_number):
 def book():
     data = request.get_json()
     user_id = data.get('user_id')
-    zone = data.get('zone')
     mahaprasad = data.get('mahaprasad', False)
     booking_date_str = data.get('booking_date')
 
+    # Ensure booking_date_str is present
+    if not booking_date_str:
+        return jsonify({"error": "Booking date is required."}), 400
+
     # Convert booking_date from string to date object
     try:
-        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
+        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()  # Correct the order here
     except ValueError:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
     # Call the create_booking function
-    return create_booking(user_id, zone, booking_date, mahaprasad)
-
+    return create_booking(user_id, booking_date, mahaprasad)
+# Get All Bookings for Admin 
 @app.route('/bookings', methods=['GET'])
 def get_all_bookings():
     try:
@@ -58,7 +61,7 @@ def get_all_bookings():
                 'id': booking.id,
                 'user_id': booking.user_id,
                 'booking_date': booking.booking_date.strftime('%Y-%m-%d'),
-                'zone': booking.zone,
+                'zone_code': booking.zone,
                 'mahaprasad': booking.mahaprasad,
                 'created_at': booking.created_at.strftime('%Y-%m-%d %H:%M:%S')
             }
@@ -68,6 +71,168 @@ def get_all_bookings():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+#fetch booking details by user id
+@app.route('/bookings/user/<int:user_id>', methods=['GET'])
+def get_user_and_booking_details(user_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT 
+                users.id, users.first_name, users.middle_name, users.last_name, 
+                users.email, users.mobile_number, users.alternate_mobile_number, 
+                users.flat_no, users.full_address, users.area, users.landmark, 
+                users.city, users.state, users.pincode, users.anugrahit, 
+                users.gender, users.unique_family_code,
+                
+                bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
+                bookings.created_at, bookings.updated_date, bookings.updated_by
+
+            FROM users
+            INNER JOIN bookings ON users.id = bookings.user_id
+            WHERE bookings.user_id = %s
+        """, (user_id,))
+        
+        result = cursor.fetchall()
+
+        if not result:
+            return jsonify({"error": "User or booking not found"}), 404
+
+        user_data = {
+            'id': result[0][0],
+            'first_name': result[0][1],
+            'middle_name': result[0][2],
+            'last_name': result[0][3],
+            'email': result[0][4],
+            'mobile_number': result[0][5],
+            'alternate_mobile_number': result[0][6],
+            'flat_no': result[0][7],
+            'full_address': result[0][8],
+            'area': result[0][9],
+            'landmark': result[0][10],
+            'city': result[0][11],
+            'state': result[0][12],
+            'pincode': result[0][13],
+            'anugrahit': result[0][14],
+            'gender': result[0][15],
+            'unique_family_code': result[0][16],
+        }
+
+        bookings = [
+            {
+                'booking_id': row[17],
+                'booking_date': row[18],
+                'mahaprasad': row[19],
+                'created_at': row[20],
+                'updated_date': row[21],
+                'updated_by': row[22]
+            }
+            for row in result
+        ]
+
+        response = {
+            'user': user_data,
+            'bookings': bookings
+        }
+
+        return jsonify(response), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+#Fetch All Booking Members List
+@app.route('/bookings/users', methods=['GET'])
+def get_all_booking_users():
+  
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Query to get all users with their booking information
+        cursor.execute("""
+            SELECT 
+                users.id, users.first_name, users.middle_name, users.last_name, 
+                users.email, users.mobile_number, users.alternate_mobile_number, 
+                users.flat_no, users.full_address, users.area, users.landmark, 
+                users.city, users.state, users.pincode, users.anugrahit, 
+                users.gender, users.unique_family_code,
+                
+                bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
+                bookings.created_at, bookings.updated_date, bookings.updated_by
+
+            FROM users
+            INNER JOIN bookings ON users.id = bookings.user_id
+        """)
+
+        result = cursor.fetchall()
+
+        if not result:
+            return jsonify({"message": "No users with bookings found"}), 404
+
+        # Structure data for JSON response
+        users_with_bookings = {}
+        for row in result:
+            user_id = row[0]
+            if user_id not in users_with_bookings:
+                # Add user data if not already in the dictionary
+                users_with_bookings[user_id] = {
+                    'id': user_id,
+                    'first_name': row[1],
+                    'middle_name': row[2],
+                    'last_name': row[3],
+                    'email': row[4],
+                    'mobile_number': row[5],
+                    'alternate_mobile_number': row[6],
+                    'flat_no': row[7],
+                    'full_address': row[8],
+                    'area': row[9],
+                    'landmark': row[10],
+                    'city': row[11],
+                    'state': row[12],
+                    'pincode': row[13],
+                    'anugrahit': row[14],
+                    'gender': row[15],
+                    'unique_family_code': row[16],
+                    'bookings': []
+                }
+            
+            # Append booking data to the user's bookings list
+            users_with_bookings[user_id]['bookings'].append({
+                'booking_id': row[17],
+                'booking_date': row[18],
+                'mahaprasad': row[19],
+                'created_at': row[20],
+                'updated_date': row[21],
+                'updated_by': row[22]
+            })
+
+        # Convert the dictionary to a list of users with bookings
+        response = {'users': list(users_with_bookings.values())}
+        
+        return jsonify(response), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        # Ensure cursor and connection are closed
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
 # Step 2: API route for inserting data into users table
 @app.route('/register', methods=['POST'])
 def register_user():
@@ -161,6 +326,8 @@ def register_user():
 # Step 2: API route for fetching all users
 @app.route('/users', methods=['GET'])
 def get_all_users():
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -391,9 +558,7 @@ def login():
             conn.close()
 
 
-@app.route('/health')
-def health_check():
-    return "Healthy", 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
