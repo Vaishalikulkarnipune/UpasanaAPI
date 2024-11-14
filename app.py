@@ -18,7 +18,9 @@ app.config.from_object(Config)
 
 # Initialize SQLAlchemy with app
 db.init_app(app)
-logging.basicConfig(level=logging.INFO)
+# Configure logging to ensure all logs are captured
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 CORS(app)
 
 def validate_email(email):
@@ -261,14 +263,14 @@ def register_user():
         pincode = data.get('pincode')
         anugrahit = data.get('anugrahit', 'no')
         gender = data.get('gender', 'male')
-
+        logging.info("Validating Passwords:")
         # Step 3: Validation checks (optional)
         if password != confirm_password:
             return jsonify({"error": "Passwords do not match"}), 400
-
+        logging.info("Validating Email:")
         if not validate_email(email):
             return jsonify({"error": "Invalid email format"}), 400
-
+        logging.info("Validating Mobile Number:")
         if not validate_mobile_number(mobile_number):
             return jsonify({"error": "Invalid mobile number format"}), 400
 
@@ -280,7 +282,7 @@ def register_user():
         zone_query = "SELECT zone_code FROM Zone WHERE pincode = %s"
         cursor.execute(zone_query, (pincode,))
         zone_result = cursor.fetchone()
-
+        logging.info("Validating Pincode:")
         # Check if zone code exists for the provided pincode
         if zone_result is None:
             return jsonify({"error": "Invalid pincode; no matching zone found"}), 400
@@ -291,6 +293,7 @@ def register_user():
          # Check if the mobile number is already registered
         cursor.execute("SELECT * FROM users WHERE mobile_number = %s", (mobile_number,))
         existing_user = cursor.fetchone()
+        logging.info("Validating Mobile Number already exist:")
         if existing_user:
             return jsonify({"error": "Already registered mobile number"}), 400
 
