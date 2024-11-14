@@ -71,7 +71,7 @@ def get_all_bookings():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-#fetch booking details by user id
+
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
 def get_user_and_booking_details(user_id):
     try:
@@ -147,90 +147,6 @@ def get_user_and_booking_details(user_id):
     finally:
         cursor.close()
         conn.close()
-
-#Fetch All Booking Members List
-@app.route('/bookings/users', methods=['GET'])
-def get_all_booking_users():
-  
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Query to get all users with their booking information
-        cursor.execute("""
-            SELECT 
-                users.id, users.first_name, users.middle_name, users.last_name, 
-                users.email, users.mobile_number, users.alternate_mobile_number, 
-                users.flat_no, users.full_address, users.area, users.landmark, 
-                users.city, users.state, users.pincode, users.anugrahit, 
-                users.gender, users.unique_family_code,
-                
-                bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
-                bookings.created_at, bookings.updated_date, bookings.updated_by
-
-            FROM users
-            INNER JOIN bookings ON users.id = bookings.user_id
-        """)
-
-        result = cursor.fetchall()
-
-        if not result:
-            return jsonify({"message": "No users with bookings found"}), 404
-
-        # Structure data for JSON response
-        users_with_bookings = {}
-        for row in result:
-            user_id = row[0]
-            if user_id not in users_with_bookings:
-                # Add user data if not already in the dictionary
-                users_with_bookings[user_id] = {
-                    'id': user_id,
-                    'first_name': row[1],
-                    'middle_name': row[2],
-                    'last_name': row[3],
-                    'email': row[4],
-                    'mobile_number': row[5],
-                    'alternate_mobile_number': row[6],
-                    'flat_no': row[7],
-                    'full_address': row[8],
-                    'area': row[9],
-                    'landmark': row[10],
-                    'city': row[11],
-                    'state': row[12],
-                    'pincode': row[13],
-                    'anugrahit': row[14],
-                    'gender': row[15],
-                    'unique_family_code': row[16],
-                    'bookings': []
-                }
-            
-            # Append booking data to the user's bookings list
-            users_with_bookings[user_id]['bookings'].append({
-                'booking_id': row[17],
-                'booking_date': row[18],
-                'mahaprasad': row[19],
-                'created_at': row[20],
-                'updated_date': row[21],
-                'updated_by': row[22]
-            })
-
-        # Convert the dictionary to a list of users with bookings
-        response = {'users': list(users_with_bookings.values())}
-        
-        return jsonify(response), 200
-
-    except psycopg2.DatabaseError as db_err:
-        logging.error(f"Database error: {str(db_err)}")
-        return jsonify({"error": "Database error occurred"}), 500
-    except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return jsonify({"error": "An unexpected error occurred"}), 500
-    finally:
-        # Ensure cursor and connection are closed
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
 
 
 # Step 2: API route for inserting data into users table
@@ -442,6 +358,8 @@ def delete_user(user_id):
 # Route to get user profile by ID
 @app.route('/users/<int:user_id>', methods=['GET'])
 def get_user_by_id(user_id):
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()

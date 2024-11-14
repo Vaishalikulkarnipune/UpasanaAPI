@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 
 # Initialize the SQLAlchemy instance
 db = SQLAlchemy()
@@ -24,9 +25,10 @@ class User(db.Model):
     anugrahit = db.Column(db.String(3), default='no')
     gender = db.Column(db.String(10), default='male')
     unique_family_code = db.Column(db.Integer, unique=True)
+    zone_code = db.Column(db.String(50), nullable=False)  # Add zone column
     
     # Relationship with Booking
-    bookings = db.relationship('Booking', backref='user', lazy=True)
+    bookings = db.relationship('Booking', back_populates='user')
     
 class Booking(db.Model):
     __tablename__ = 'bookings'
@@ -34,9 +36,12 @@ class Booking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     booking_date = db.Column(db.Date, nullable=False)
-    zone = db.Column(db.String(1), nullable=False)
     mahaprasad = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_date = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, nullable=True)
+
+    user = db.relationship('User', back_populates='bookings')
 
 class Zone(db.Model):
     __tablename__ = 'Zone'
