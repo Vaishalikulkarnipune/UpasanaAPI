@@ -146,8 +146,11 @@ def get_user_and_booking_details(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 #Fetch All Booking Members List
 @app.route('/bookings/users', methods=['GET'])
@@ -227,10 +230,10 @@ def get_all_booking_users():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        # Ensure cursor and connection are closed
-        if cursor:
+         # Close cursor and connection if they are defined
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None:
             conn.close()
 
 
@@ -321,8 +324,11 @@ def register_user():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Step 2: API route for fetching all users
 @app.route('/users', methods=['GET'])
@@ -370,8 +376,11 @@ def get_all_users():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
@@ -411,8 +420,11 @@ def update_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
@@ -437,8 +449,11 @@ def delete_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Route to get user profile by ID
 @app.route('/users/<int:user_id>', methods=['GET'])
@@ -487,8 +502,11 @@ def get_user_by_id(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+        # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Example route to get bookings with user details
 @app.route('/bookings-with-users', methods=['GET'])
