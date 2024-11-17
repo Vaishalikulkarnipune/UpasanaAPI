@@ -18,7 +18,9 @@ app.config.from_object(Config)
 
 # Initialize SQLAlchemy with app
 db.init_app(app)
-logging.basicConfig(level=logging.INFO)
+# Configure logging to ensure all logs are captured
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 CORS(app)
 
 def validate_email(email):
@@ -146,8 +148,11 @@ def get_user_and_booking_details(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 #Fetch All Booking Members List
 @app.route('/bookings/users', methods=['GET'])
@@ -227,10 +232,10 @@ def get_all_booking_users():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        # Ensure cursor and connection are closed
-        if cursor:
+         # Close cursor and connection if they are defined
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None:
             conn.close()
 
 
@@ -258,14 +263,14 @@ def register_user():
         pincode = data.get('pincode')
         anugrahit = data.get('anugrahit', 'no')
         gender = data.get('gender', 'male')
-
+        logging.info("Validating Passwords:")
         # Step 3: Validation checks (optional)
         if password != confirm_password:
             return jsonify({"error": "Passwords do not match"}), 400
-
+        logging.info("Validating Email:")
         if not validate_email(email):
             return jsonify({"error": "Invalid email format"}), 400
-
+        logging.info("Validating Mobile Number:")
         if not validate_mobile_number(mobile_number):
             return jsonify({"error": "Invalid mobile number format"}), 400
 
@@ -277,7 +282,7 @@ def register_user():
         zone_query = "SELECT zone_code FROM Zone WHERE pincode = %s"
         cursor.execute(zone_query, (pincode,))
         zone_result = cursor.fetchone()
-
+        logging.info("Validating Pincode:")
         # Check if zone code exists for the provided pincode
         if zone_result is None:
             return jsonify({"error": "Invalid pincode; no matching zone found"}), 400
@@ -288,6 +293,7 @@ def register_user():
          # Check if the mobile number is already registered
         cursor.execute("SELECT * FROM users WHERE mobile_number = %s", (mobile_number,))
         existing_user = cursor.fetchone()
+        logging.info("Validating Mobile Number already exist:")
         if existing_user:
             return jsonify({"error": "Already registered mobile number"}), 400
 
@@ -321,8 +327,11 @@ def register_user():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Step 2: API route for fetching all users
 @app.route('/users', methods=['GET'])
@@ -370,8 +379,11 @@ def get_all_users():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
@@ -411,8 +423,11 @@ def update_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
@@ -437,8 +452,11 @@ def delete_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+         # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Route to get user profile by ID
 @app.route('/users/<int:user_id>', methods=['GET'])
@@ -487,8 +505,11 @@ def get_user_by_id(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        cursor.close()
-        conn.close()
+        # Close cursor and connection if they are defined
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 # Example route to get bookings with user details
 @app.route('/bookings-with-users', methods=['GET'])
