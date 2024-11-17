@@ -266,18 +266,13 @@ def register_user():
         pincode = data.get('pincode')
         anugrahit = data.get('anugrahit', 'no')
         gender = data.get('gender', 'male')
-
         # Fixed city and state values
         city = "PUNE"
         state = "Maharashtra"
-
         logging.info("Validating Passwords:")
         # Step 3: Validation checks (optional)
         if password != confirm_password:
             return jsonify({"error": "Passwords do not match"}), 400
-        logging.info("Validating Email:")
-        if not validate_email(email):
-            return jsonify({"error": "Invalid email format"}), 400
         logging.info("Validating Mobile Number:")
         if not validate_mobile_number(mobile_number):
             return jsonify({"error": "Invalid mobile number format"}), 400
@@ -286,7 +281,7 @@ def register_user():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-                 # Query to get the zone code
+        # Query to get the zone code
         zone_query = "SELECT zone_code FROM Zone WHERE pincode = %s"
         cursor.execute(zone_query, (pincode,))
         zone_result = cursor.fetchone()
@@ -298,7 +293,7 @@ def register_user():
         # Retrieve the zone code from the query result
         zone_code = zone_result[0]
 
-         # Check if the mobile number is already registered
+        # Check if the mobile number is already registered
         cursor.execute("SELECT * FROM users WHERE mobile_number = %s", (mobile_number,))
         existing_user = cursor.fetchone()
         logging.info("Validating Mobile Number already exist:")
@@ -335,7 +330,7 @@ def register_user():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-         # Close cursor and connection if they are defined
+        # Close cursor and connection if they are defined
         if cursor is not None:
             cursor.close()
         if conn is not None:
@@ -387,7 +382,7 @@ def get_all_users():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-         # Close cursor and connection if they are defined
+        # Close cursor and connection if they are defined
         if cursor is not None:
             cursor.close()
         if conn is not None:
@@ -433,7 +428,7 @@ def update_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-         # Close cursor and connection if they are defined
+        # Close cursor and connection if they are defined
         if cursor is not None:
             cursor.close()
         if conn is not None:
@@ -464,7 +459,7 @@ def delete_user(user_id):
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-         # Close cursor and connection if they are defined
+        # Close cursor and connection if they are defined
         if cursor is not None:
             cursor.close()
         if conn is not None:
