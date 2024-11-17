@@ -584,8 +584,8 @@ def login():
         if conn is not None:
             conn.close()
   #get total users and bookings                   
-@app.route('/total_users_and_bookings', methods=['GET'])
-def total_users_and_bookings():
+@app.route('/upasanaUsersSummary', methods=['GET'])
+def upasanaUsersSummary():
     # Get total number of registered users
     total_users = User.query.count()
 
