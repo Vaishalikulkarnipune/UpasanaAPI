@@ -77,6 +77,8 @@ def get_all_bookings():
 
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
 def get_user_and_booking_details(user_id):
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -157,7 +159,8 @@ def get_user_and_booking_details(user_id):
 #Fetch All Booking Members List
 @app.route('/bookings/users', methods=['GET'])
 def get_all_booking_users():
-  
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -242,6 +245,8 @@ def get_all_booking_users():
 # Step 2: API route for inserting data into users table
 @app.route('/register', methods=['POST'])
 def register_user():
+    conn = None
+    cursor = None
     try:
         data = request.get_json()
 
@@ -391,6 +396,8 @@ def get_all_users():
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
+    conn = None
+    cursor = None
     try:
         data = request.json  # Get JSON data from request body
 
@@ -435,6 +442,8 @@ def update_user(user_id):
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
