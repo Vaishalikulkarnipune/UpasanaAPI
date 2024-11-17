@@ -288,7 +288,7 @@ def register_user():
         logging.info("Validating Pincode:")
         # Check if zone code exists for the provided pincode
         if zone_result is None:
-            return jsonify({"error": "Invalid pincode; no matching zone found"}), 400
+            return jsonify({"Invalid pin code": "Pin code not found. Please contact administrator"}), 400
 
         # Retrieve the zone code from the query result
         zone_code = zone_result[0]
