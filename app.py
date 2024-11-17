@@ -258,11 +258,14 @@ def register_user():
         full_address = data.get('full_address')
         area = data.get('area', None)
         landmark = data.get('landmark', None)
-        city = data.get('city')
-        state = data.get('state')
         pincode = data.get('pincode')
         anugrahit = data.get('anugrahit', 'no')
         gender = data.get('gender', 'male')
+
+        # Fixed city and state values
+        city = "PUNE"
+        state = "Maharashtra"
+
         logging.info("Validating Passwords:")
         # Step 3: Validation checks (optional)
         if password != confirm_password:

@@ -85,18 +85,21 @@ def create_booking(user_id, booking_date, mahaprasad=False):
    # Restrict Zone A users to one booking per month
     if zone_code == "A":
         if monthly_booking_count >= 1:
+            print("Zone A user allow only 1 booking once per month")
             return jsonify({"error": "Zone A members can only book once per month."}), 400
         if zone_a_booking_count >= 1:
             return jsonify({"error": "A booking already exists for Zone A in this month."}), 400
     
     elif zone_code == "B":
         if monthly_booking_count >= 2:  # Individual restriction
+            print("Zone B user allow only 2 booking once per month")
             return jsonify({"error": "Zone B members can only book twice per month."}), 400
     if zone_b_booking_count >= 2:  # Collective restriction
         return jsonify({"error": "Zone B already has two bookings this month."}), 400
 
     elif zone_code == "C":
         if monthly_booking_count >= 2:  # Individual restriction
+            print("Zone C user allow only 2 booking once per month")
             return jsonify({"error": "Zone C members can only book twice per month."}), 400
     if zone_c_booking_count >= 2:  # Collective restriction
         return jsonify({"error": "Zone C already has two bookings this month."}), 400
