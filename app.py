@@ -100,7 +100,7 @@ def get_user_and_booking_details(user_id):
         result = cursor.fetchall()
 
         if not result:
-            return jsonify({"error": "User or booking not found"}), 404
+            return jsonify({"message": "User or booking not found, but here's some info."}), 200
 
         user_data = {
             'id': result[0][0],
