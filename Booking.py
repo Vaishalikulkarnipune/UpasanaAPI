@@ -12,35 +12,6 @@ def get_saturdays_for_year():
         if date.weekday() == 5:  # Saturday is the 5th weekday
             saturdays.append(date.date())
     return saturdays
-
-# Check if booking is allowed based on rules for zone and date
-def is_booking_allowed(user_id, zone_code, booking_date):
-    # Get the current year to restrict to once per year
-    current_year = datetime.now().year
-    start_of_year = datetime(current_year, 1, 1)
-    end_of_year = datetime(current_year, 12, 31)
-
-    # Fetch existing bookings for the user within the year
-    existing_bookings = Booking.query.filter_by(user_id=user_id).filter(
-        Booking.booking_date.between(start_of_year, end_of_year)
-    ).all()
-
-    # Apply zone-specific booking rules
-    if zone_code == 'A' and len(existing_bookings) >= 1:
-        return False, "Zone A members can only book once per year."
-    elif zone_code in ['B', 'C'] and len(existing_bookings) >= 2:
-        return False, "Zone B and C members can book a maximum of twice per year."
-
-    # Ensure the booking date is a Saturday
-    if booking_date not in get_saturdays_for_year():
-        return False, "You can only book on Saturdays."
-
-    # Prevent duplicate bookings for the same date
-    duplicate_booking = Booking.query.filter_by(user_id=user_id, booking_date=booking_date).first()
-    if duplicate_booking:
-        return False, "A booking already exists for this date."
-
-    return True, "Booking is allowed."
     
    # Function to create a booking if allowed
 def create_booking(user_id, booking_date, mahaprasad=False):
@@ -56,38 +27,90 @@ def create_booking(user_id, booking_date, mahaprasad=False):
     if booking_date.weekday() != 5:  
         return jsonify({"error": "You can only book on Saturdays."}), 400
 
-    # Check if the user has already made a booking in the current year
+# Fetch the user's zone code
+    user = User.query.filter_by(id=user_id).first()
+    if user:
+        # Retrieve the zone_code from the User table
+        zone_code = user.zone_code
+        print(f"User with ID {user_id} belongs to Zone {zone_code}.")
+    else:
+       # return jsonify({"error": "User not found."}), 404
+        print("User not found")
+
+    # Ensure the user can only book once per year
     year_start = datetime(booking_date.year, 1, 1)
     year_end = datetime(booking_date.year, 12, 31)
-    
-    # Convert the datetime to date (to match the format of booking_date in DB)
-    year_start_date = year_start.date()
-    year_end_date = year_end.date()
-
     existing_booking = Booking.query.filter(
         Booking.user_id == user_id,
-        Booking.booking_date >= year_start_date,
-        Booking.booking_date <= year_end_date
+        Booking.booking_date >= year_start,
+        Booking.booking_date <= year_end
     ).first()
 
     if existing_booking:
         return jsonify({"error": "You have already made a booking for this year."}), 400
 
-    # Check if the user has already booked for the selected Saturday
-    existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, 
-                                                           booking_date=booking_date).first()
+    # Check the booking restrictions based on the user's zone code
+    month_start = booking_date.replace(day=1)  # First day of the current month
+    next_month = booking_date.replace(day=28) + timedelta(days=4)  # Go to next month
+    month_end = next_month.replace(day=1) - timedelta(days=1)  # Last day of the current month
 
+    # Count existing bookings in the current month
+    monthly_booking_count = Booking.query.filter(
+        Booking.user_id == user_id,
+        Booking.booking_date >= month_start,
+        Booking.booking_date <= month_end
+    ).count()
+
+# Count all Zone A bookings in the current month
+    zone_a_booking_count = Booking.query.join(User).filter(
+        User.zone_code == "A",
+        Booking.booking_date >= month_start,
+        Booking.booking_date <= month_end
+    ).count()
+
+# Count Zone B bookings in the current month
+    zone_b_booking_count = Booking.query.join(User).filter(
+    User.zone_code == "B",
+    Booking.booking_date >= month_start,
+    Booking.booking_date <= month_end
+).count()
+
+# Count Zone C bookings in the current month
+    zone_c_booking_count = Booking.query.join(User).filter(
+    User.zone_code == "C",
+    Booking.booking_date >= month_start,
+    Booking.booking_date <= month_end
+).count()
+
+   # Restrict Zone A users to one booking per month
+    if zone_code == "A":
+        if monthly_booking_count >= 1:
+            return jsonify({"error": "Zone A members can only book once per month."}), 400
+        if zone_a_booking_count >= 1:
+            return jsonify({"error": "A booking already exists for Zone A in this month."}), 400
+    
+    elif zone_code == "B":
+        if monthly_booking_count >= 2:  # Individual restriction
+            return jsonify({"error": "Zone B members can only book twice per month."}), 400
+    if zone_b_booking_count >= 2:  # Collective restriction
+        return jsonify({"error": "Zone B already has two bookings this month."}), 400
+
+    elif zone_code == "C":
+        if monthly_booking_count >= 2:  # Individual restriction
+            return jsonify({"error": "Zone C members can only book twice per month."}), 400
+    if zone_c_booking_count >= 2:  # Collective restriction
+        return jsonify({"error": "Zone C already has two bookings this month."}), 400
+    #    # Check if the user has already booked for the selected Saturday
+    existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, booking_date=booking_date).first()
     if existing_booking_on_saturday:
         return jsonify({"error": "You have already booked a slot on this Saturday."}), 400
 
-    # Fetch the user's zone code
-    user = User.query.filter_by(id=user_id).first()
-    if not user:
-        return jsonify({"error": "User not found."}), 404
-    
-    # Retrieve the zone_code from the User table
-    zone_code = user.zone_code
-
+# Check if the selected Saturday is already fully booked
+    total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date).count()
+    if total_bookings_on_saturday > 0:
+        print("this saturday is already booked")
+        return jsonify({"error": "This Saturday is already fully booked."}), 400
+        
     # Create the new booking entry
     new_booking = Booking(
         user_id=user_id,
@@ -95,7 +118,7 @@ def create_booking(user_id, booking_date, mahaprasad=False):
         mahaprasad=mahaprasad,
         created_at=datetime.utcnow(),
         updated_date=datetime.utcnow(),
-        updated_by=user_id  # Assuming the user making the booking is updating
+        updated_by=user_id
     )
 
     # Add the booking to the session and commit
@@ -104,3 +127,5 @@ def create_booking(user_id, booking_date, mahaprasad=False):
 
     # Return a success message
     return jsonify({"message": "Booking successful."}), 201
+
+   
