@@ -334,7 +334,7 @@ def register_user():
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 # Step 2: API route for fetching all users
 @app.route('/users', methods=['GET'])
