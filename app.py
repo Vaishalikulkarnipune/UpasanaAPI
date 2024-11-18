@@ -154,7 +154,7 @@ def get_user_and_booking_details(user_id):
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 #Fetch All Booking Members List
 @app.route('/bookings/users', methods=['GET'])
@@ -239,7 +239,7 @@ def get_all_booking_users():
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 
 # Step 2: API route for inserting data into users table
@@ -386,7 +386,7 @@ def get_all_users():
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
@@ -432,7 +432,7 @@ def update_user(user_id):
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
@@ -463,7 +463,7 @@ def delete_user(user_id):
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 # Route to get user profile by ID
 @app.route('/users/<int:user_id>', methods=['GET'])
@@ -516,7 +516,7 @@ def get_user_by_id(user_id):
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
 
 # Example route to get bookings with user details
 @app.route('/bookings-with-users', methods=['GET'])
@@ -531,7 +531,6 @@ def get_bookings_with_users():
     # Format the data for JSON response
     bookings_with_users = [
         {
-           
             "booking_date": booking.booking_date,
             "zone": booking.zone,
            
@@ -586,7 +585,7 @@ def login():
         if cursor is not None:
             cursor.close()
         if conn is not None:
-            conn.close()
+            release_db_connection(conn)
   #get total users and bookings                   
 @app.route('/upasanaUsersSummary', methods=['GET'])
 def upasanaUsersSummary():

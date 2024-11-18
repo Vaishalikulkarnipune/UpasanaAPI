@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 url = "https://upasana-app-gdm2p.ondigitalocean.app/register"
 
 # Base mobile number to start with
-base_mobile_number = 1234561295
+base_mobile_number = 1234562700
 
 # Define the payload data template for registration
 payload_template = {
@@ -58,7 +58,7 @@ def load_test_concurrent_requests(number_of_requests):
 
 if __name__ == "__main__":
     # Set the number of concurrent requests (e.g., 10 requests)
-    number_of_requests = 100
+    number_of_requests = 999
 
     # Run the load test
     load_test_concurrent_requests(number_of_requests)
