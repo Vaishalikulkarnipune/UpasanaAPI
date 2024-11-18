@@ -23,7 +23,7 @@ class Config:
 
     # Create connection pool using the connection pool URI
     connection_pool = pool.SimpleConnectionPool(
-        1, 20,
+        1, 22,
         dsn=CONNECTION_POOL_URI
     )
 
