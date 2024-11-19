@@ -553,6 +553,9 @@ def login():
         mobile_number = data.get('mobile_number')
         password = data.get('password')
 
+        if not mobile_number:
+            return jsonify({"error": "Register with mobile number to login"}), 400
+
         if not mobile_number or not password:
             return jsonify({"error": "Mobile number and password are required"}), 400
 
