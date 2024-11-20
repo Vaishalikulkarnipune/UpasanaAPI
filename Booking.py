@@ -47,7 +47,7 @@ def create_booking(user_id, booking_date, mahaprasad=False):
     ).first()
 
     if existing_booking:
-        return jsonify({"error": "You have already made a booking for this year."}), 400
+        return jsonify({"error": "You have already made one booking for this year."}), 400
 
     # Check the booking restrictions based on the user's zone code
     month_start = booking_date.replace(day=1)  # First day of the current month
