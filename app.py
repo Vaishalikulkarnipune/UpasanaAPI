@@ -33,22 +33,26 @@ def validate_mobile_number(mobile_number):
 
 # Function to fetch the feature toggle
 def get_feature_toggle(toggle_name):
-    # Query the feature_toggle table for the 'enable_booking' flag
-    feature_toggle = FeatureToggle.query.filter_by(toggle_name).first()  # Corrected column name here
+    """
+    Fetches the feature toggle by its name.
+    """
+    # Query the feature_toggle table for the given toggle_name
+    feature_toggle = FeatureToggle.query.filter_by(toggle_name=toggle_name).first()  # Fixed filter_by syntax
     return feature_toggle
+
 
 @app.route('/book', methods=['POST'])
 def book():
-
-    # Fetch the feature toggle settings
+    """
+    Handles booking requests.
+    """
+    # Fetch the feature toggle settings for 'enable_booking'
     feature_toggle = get_feature_toggle('enable_booking')
 
     # If feature toggle is not found or the booking feature is disabled
-    if not feature_toggle or not feature_toggle.toggle_enabled:  # Corrected attribute name here
+    if not feature_toggle or not feature_toggle.toggle_enabled:  # Fixed attribute name
         return jsonify({"error": "Upasana booking is not available right now!"}), 400
-    
-    # Get the data from the request
-    
+
     # Get the data from the request
     data = request.get_json()
     user_id = data.get('user_id')
@@ -61,13 +65,16 @@ def book():
 
     # Convert booking_date from string to date object
     try:
-        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()  # Correct the order here
+        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-    # Call the create_booking function
-    return create_booking(user_id, booking_date, mahaprasad)
+    # Check if zone restrictions are enabled
+    zone_restriction_toggle = get_feature_toggle('enable_zone_restriction')
+    enable_zone_restriction = zone_restriction_toggle.toggle_enabled if zone_restriction_toggle else False
 
+    # Call the create_booking function
+    return create_booking(user_id, booking_date, mahaprasad, enable_zone_restriction)
 
 # Get All Bookings for Admin 
 @app.route('/bookings', methods=['GET'])
