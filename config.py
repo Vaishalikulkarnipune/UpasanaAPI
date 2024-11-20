@@ -39,10 +39,10 @@ class Config:
 
 # Function to get a connection from the connection pool
 def get_db_connection():
-    logging.info("Acquiring a connection from the pool.")
+   #logging.info("Acquiring a connection from the pool.")
     return Config.connection_pool.getconn()
 
 # Function to release a connection back to the pool
 def release_db_connection(conn):
-    logging.info("Releasing the connection back to the pool.")
+    #logging.info("Releasing the connection back to the pool.")
     Config.connection_pool.putconn(conn)

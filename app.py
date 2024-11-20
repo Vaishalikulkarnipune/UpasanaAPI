@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User
+from model import db,Booking,User,FeatureToggle
 from Booking import create_booking
 from datetime import datetime
 from config import get_db_connection, release_db_connection,Config
@@ -31,8 +31,25 @@ def validate_mobile_number(mobile_number):
     pattern = r'^\d{10}$'  # Assuming a 10-digit mobile number
     return re.match(pattern, mobile_number)
 
+# Function to fetch the feature toggle
+def get_feature_toggle():
+    # Query the feature_toggle table for the 'enable_booking' flag
+    feature_toggle = FeatureToggle.query.filter_by(toggle_name='enable_booking').first()  # Corrected column name here
+    return feature_toggle
+
 @app.route('/book', methods=['POST'])
 def book():
+
+    # Fetch the feature toggle settings
+    feature_toggle = get_feature_toggle()
+
+    # If feature toggle is not found or the booking feature is disabled
+    if not feature_toggle or not feature_toggle.toggle_enabled:  # Corrected attribute name here
+        return jsonify({"error": "Booking is currently disabled."}), 400
+    
+    # Get the data from the request
+    
+    # Get the data from the request
     data = request.get_json()
     user_id = data.get('user_id')
     mahaprasad = data.get('mahaprasad', False)
@@ -50,6 +67,8 @@ def book():
 
     # Call the create_booking function
     return create_booking(user_id, booking_date, mahaprasad)
+
+
 # Get All Bookings for Admin 
 @app.route('/bookings', methods=['GET'])
 def get_all_bookings():

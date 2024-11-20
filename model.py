@@ -55,3 +55,13 @@ class Zone(db.Model):
     # Add a string representation for better debugging
     def __repr__(self):
         return f"<Booking {self.id}, User {self.user_id}, Date {self.booking_date}, Zone {self.zone}>"
+
+class FeatureToggle(db.Model):
+    __tablename__ = 'feature_toggle'
+
+    id = db.Column(db.Integer, primary_key=True)
+    toggle_name = db.Column(db.String(50), unique=True, nullable=False)
+    toggle_enabled = db.Column(db.Boolean, nullable=False)  # Corrected typo here
+
+    def __repr__(self):
+        return f"<FeatureToggle {self.toggle_name}: {self.toggle_enabled}>"
