@@ -627,6 +627,15 @@ def upasanaUsersSummary():
         "total_booking_users": total_booking_users
     }), 200
 
+# Get Booking dates for booking date must be gray
+@app.route('/bookingsDates', methods=['GET'])
+def get_all_booked_dates():
+    booked_dates = Booking.query.with_entities(Booking.booking_date).all()
+    # Return dates in ISO format
+    dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
+    print("Booked Dates are:", dates)
+    return jsonify({"booked_dates": dates}), 200
+
 @app.route('/health')
 def health_check():
     return "Healthy", 200
