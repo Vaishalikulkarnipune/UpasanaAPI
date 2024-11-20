@@ -14,7 +14,7 @@ def get_saturdays_for_year():
     return saturdays
     
    # Function to create a booking if allowed
-def create_booking(user_id, booking_date, mahaprasad=False):
+def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restriction=True):
     # Ensure booking_date is a datetime object (if it's a string, parse it, otherwise assume it's already a datetime.date)
     if isinstance(booking_date, str):
         try:
@@ -27,7 +27,7 @@ def create_booking(user_id, booking_date, mahaprasad=False):
     if booking_date.weekday() != 5:  
         return jsonify({"error": "You can only book on Saturdays."}), 400
 
-# Fetch the user's zone code
+    # Fetch the user's zone code
     user = User.query.filter_by(id=user_id).first()
     if user:
         # Retrieve the zone_code from the User table
@@ -37,7 +37,7 @@ def create_booking(user_id, booking_date, mahaprasad=False):
        # return jsonify({"error": "User not found."}), 404
         print("User not found")
 
-# Ensure the user can only book once per year
+    # Ensure the user can only book once per year
     year_start = datetime(booking_date.year, 1, 1)
     year_end = datetime(booking_date.year, 12, 31)
     existing_booking = Booking.query.filter(
@@ -61,54 +61,59 @@ def create_booking(user_id, booking_date, mahaprasad=False):
         Booking.booking_date <= month_end
     ).count()
 
-# Count all Zone A bookings in the current month
+    # Count all Zone A bookings in the current month
     zone_a_booking_count = Booking.query.join(User).filter(
         User.zone_code == "A",
         Booking.booking_date >= month_start,
         Booking.booking_date <= month_end
     ).count()
 
-# Count Zone B bookings in the current month
+    # Count Zone B bookings in the current month
     zone_b_booking_count = Booking.query.join(User).filter(
     User.zone_code == "B",
     Booking.booking_date >= month_start,
     Booking.booking_date <= month_end
-).count()
+    ).count()
 
-# Count Zone C bookings in the current month
+    # Count Zone C bookings in the current month
     zone_c_booking_count = Booking.query.join(User).filter(
     User.zone_code == "C",
     Booking.booking_date >= month_start,
     Booking.booking_date <= month_end
-).count()
+    ).count()
 
-   # Restrict Zone A users to one booking per month
-    if zone_code == "A":
-        if monthly_booking_count >= 1:
-            print("Zone A user allow only 1 booking once per month")
-            return jsonify({"error": "Try another month, Zone A(East Pune) members can only book once per month."}), 400
-        if zone_a_booking_count >= 1:
-            return jsonify({"error": "Try another month, Booking full for Zone A(East Pune) for this month"}), 400
-    
-    elif zone_code == "B":
-        if monthly_booking_count >= 2:  # Individual restriction
-            print("Zone B user allow only 2 booking once per month")
-            return jsonify({"error": "Try another month, Zone B(Rest of Pune) members can only book twice per month."}), 400
-        if zone_b_booking_count >= 2:  # Collective restriction
-            return jsonify({"error": "Try another month, Booking full for Zone B(Rest of Pune) for this month"}), 400
 
-    elif zone_code == "C":
-        if monthly_booking_count >= 2:  # Individual restriction
-            print("Zone C user allow only 2 booking once per month")
-            return jsonify({"error": "Try another month, Zone C(PCMC) members can only book twice per month."}), 400
-        if zone_c_booking_count >= 2:  # Collective restriction
-            return jsonify({"error": "Try another month, Booking full for Zone C(PCMC) for this month"}), 400
-    #    # Check if the user has already booked for the selected Saturday
+    # Restrict Zone A users to one booking per month
+    # Check if zone restriction is enabled
+    if enable_zone_restriction:
+        if zone_code == "A":
+            if monthly_booking_count >= 1:
+                print("Zone A user allow only 1 booking once per month")
+                return jsonify({"error": "Try another month, Zone A(East Pune) members can only book once per month."}), 400
+            if zone_a_booking_count >= 1:
+                return jsonify({"error": "Try another month, Booking full for Zone A(East Pune) for this month"}), 400
+
+        elif zone_code == "B":
+            if monthly_booking_count >= 2:  # Individual restriction
+                print("Zone B user allow only 2 booking once per month")
+                return jsonify({"error": "Try another month, Zone B(Rest of Pune) members can only book twice per month."}), 400
+            if zone_b_booking_count >= 2:  # Collective restriction
+                return jsonify({"error": "Try another month, Booking full for Zone B(Rest of Pune) for this month"}), 400
+
+        elif zone_code == "C":
+            if monthly_booking_count >= 2:  # Individual restriction
+                print("Zone C user allow only 2 booking once per month")
+                return jsonify({"error": "Try another month, Zone C(PCMC) members can only book twice per month."}), 400
+            if zone_c_booking_count >= 2:  # Collective restriction
+                return jsonify({"error": "Try another month, Booking full for Zone C(PCMC) for this month"}), 400
+   
+    # Check if the user has already booked for the selected Saturday
     existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, booking_date=booking_date).first()
+    
     if existing_booking_on_saturday:
         return jsonify({"error": "Upasana is booked for this Saturday."}), 400
 
-# Check if the selected Saturday is already fully booked
+    # Check if the selected Saturday is already fully booked
     total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date).count()
     if total_bookings_on_saturday > 0:
         print("Upasana is booked for this Saturday.")

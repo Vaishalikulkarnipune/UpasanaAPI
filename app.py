@@ -32,20 +32,20 @@ def validate_mobile_number(mobile_number):
     return re.match(pattern, mobile_number)
 
 # Function to fetch the feature toggle
-def get_feature_toggle():
+def get_feature_toggle(toggle_name):
     # Query the feature_toggle table for the 'enable_booking' flag
-    feature_toggle = FeatureToggle.query.filter_by(toggle_name='enable_booking').first()  # Corrected column name here
+    feature_toggle = FeatureToggle.query.filter_by(toggle_name).first()  # Corrected column name here
     return feature_toggle
 
 @app.route('/book', methods=['POST'])
 def book():
 
     # Fetch the feature toggle settings
-    feature_toggle = get_feature_toggle()
+    feature_toggle = get_feature_toggle('enable_booking')
 
     # If feature toggle is not found or the booking feature is disabled
     if not feature_toggle or not feature_toggle.toggle_enabled:  # Corrected attribute name here
-        return jsonify({"error": "Booking is currently disabled."}), 400
+        return jsonify({"error": "Upasana booking is not available right now!"}), 400
     
     # Get the data from the request
     
