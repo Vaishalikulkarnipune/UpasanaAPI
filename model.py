@@ -40,6 +40,7 @@ class Booking(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_date = db.Column(db.DateTime, onupdate=datetime.utcnow)
     updated_by = db.Column(db.Integer, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
 
     user = db.relationship('User', back_populates='bookings')
 

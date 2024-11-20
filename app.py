@@ -615,7 +615,8 @@ def login():
             cursor.close()
         if conn is not None:
             release_db_connection(conn)
-  #get total users and bookings                   
+
+#get total users and bookings                   
 @app.route('/upasanaUsersSummary', methods=['GET'])
 def upasanaUsersSummary():
     # Get total number of registered users
@@ -642,6 +643,55 @@ def get_all_booked_dates():
     dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
     print("Booked Dates are:", dates)
     return jsonify({"booked_dates": dates}), 200
+
+@app.route('/cancel_booking', methods=['POST'])
+def cancel_booking():
+    conn = None
+    cursor = None
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        booking_id = data.get('booking_id')
+
+        # Validate the input
+        if not user_id or not booking_id:
+            return jsonify({"error": "User ID and Booking ID are required"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if the booking exists and is active
+        cursor.execute(
+            "SELECT id FROM bookings WHERE id = %s AND user_id = %s AND is_active = TRUE",
+            (booking_id, user_id)
+        )
+        booking = cursor.fetchone()
+
+        if not booking:
+            return jsonify({"error": "Booking not found or already cancelled"}), 404
+
+        # Update the booking to set is_active to False
+        cursor.execute(
+            "UPDATE bookings SET is_active = FALSE, updated_date = NOW() WHERE id = %s",
+            (booking_id,)
+        )
+        conn.commit()
+
+        return jsonify({"message": "Booking cancelled successfully"}), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        # Close cursor and connection
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            release_db_connection(conn)
+
 
 @app.route('/health')
 def health_check():

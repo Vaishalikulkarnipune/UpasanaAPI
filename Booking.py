@@ -43,7 +43,8 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
     existing_booking = Booking.query.filter(
         Booking.user_id == user_id,
         Booking.booking_date >= year_start,
-        Booking.booking_date <= year_end
+        Booking.booking_date <= year_end,
+        Booking.is_active == True  # Include only active bookings
     ).first()
 
     if existing_booking:
@@ -58,28 +59,32 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
     monthly_booking_count = Booking.query.filter(
         Booking.user_id == user_id,
         Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end
+        Booking.booking_date <= month_end,
+        Booking.is_active == True  # Include only active bookings
     ).count()
 
     # Count all Zone A bookings in the current month
     zone_a_booking_count = Booking.query.join(User).filter(
         User.zone_code == "A",
         Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end
+        Booking.booking_date <= month_end,
+        Booking.is_active == True  # Include only active bookings
     ).count()
 
     # Count Zone B bookings in the current month
     zone_b_booking_count = Booking.query.join(User).filter(
     User.zone_code == "B",
     Booking.booking_date >= month_start,
-    Booking.booking_date <= month_end
+    Booking.booking_date <= month_end,
+    Booking.is_active == True  # Include only active bookings
     ).count()
 
     # Count Zone C bookings in the current month
     zone_c_booking_count = Booking.query.join(User).filter(
     User.zone_code == "C",
     Booking.booking_date >= month_start,
-    Booking.booking_date <= month_end
+    Booking.booking_date <= month_end,
+    Booking.is_active == True  # Include only active bookings
     ).count()
 
 
@@ -108,13 +113,13 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
                 return jsonify({"error": "Try another month, Booking full for Zone C(PCMC) for this month"}), 400
    
     # Check if the user has already booked for the selected Saturday
-    existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, booking_date=booking_date).first()
+    existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, booking_date=booking_date,is_active = True).first()
     
     if existing_booking_on_saturday:
         return jsonify({"error": "Upasana is booked for this Saturday."}), 400
 
     # Check if the selected Saturday is already fully booked
-    total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date).count()
+    total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date,is_active=True).count()
     if total_bookings_on_saturday > 0:
         print("Upasana is booked for this Saturday.")
         
