@@ -108,19 +108,19 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
             if zone_a_booking_count >= 1:
                 return jsonify({"error": "Try another month, Booking full for Zone A(East Pune) for this month"}), 400
             
-            # Get number of Saturdays in the month of the booking_date
-            saturdays_count = count_saturdays_in_month(booking_date)
-
-            open_booking_in_month =saturdays_count-monthly_booking_count;
-            if open_booking_in_month == 1 and zone_a_booking_count==0:
-                return jsonify({"error": "Try another month, Remaining booking is reserved for Zone A(East Pune) for this month"}), 400
-
         elif zone_code == "B":
             if monthly_booking_count >= 2:  # Individual restriction
                 print("Zone B user allow only 2 booking once per month")
                 return jsonify({"error": "Try another month, Zone B(Rest of Pune) members can only book twice per month."}), 400
             if zone_b_booking_count >= 2:  # Collective restriction
                 return jsonify({"error": "Try another month, Booking full for Zone B(Rest of Pune) for this month"}), 400
+            
+            # Get number of Saturdays in the month of the booking_date
+            saturdays_count = count_saturdays_in_month(booking_date)
+            
+            open_booking_in_month =saturdays_count-monthly_booking_count;
+            if open_booking_in_month == 1 and zone_a_booking_count==0:
+                return jsonify({"error": "Try another month, Remaining booking is reserved for Zone A(East Pune) for this month"}), 400
 
         elif zone_code == "C":
             if monthly_booking_count >= 2:  # Individual restriction
@@ -128,6 +128,14 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
                 return jsonify({"error": "Try another month, Zone C(PCMC) members can only book twice per month."}), 400
             if zone_c_booking_count >= 2:  # Collective restriction
                 return jsonify({"error": "Try another month, Booking full for Zone C(PCMC) for this month"}), 400
+        
+            # Get number of Saturdays in the month of the booking_date
+            saturdays_count = count_saturdays_in_month(booking_date)
+            
+            open_booking_in_month =saturdays_count-monthly_booking_count;
+            if open_booking_in_month == 1 and zone_a_booking_count==0:
+                return jsonify({"error": "Try another month, Remaining booking is reserved for Zone A(East Pune) for this month"}), 400
+
    
     # Check if the user has already booked for the selected Saturday
     existing_booking_on_saturday = Booking.query.filter_by(user_id=user_id, booking_date=booking_date,is_active = True).first()
