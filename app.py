@@ -201,7 +201,8 @@ def get_all_booking_users():
                 users.gender, users.unique_family_code,
                 
                 bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
-                bookings.created_at, bookings.updated_date, bookings.updated_by
+                bookings.created_at,bookings.is_active,
+                bookings.updated_date, bookings.updated_by
 
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
@@ -245,8 +246,9 @@ def get_all_booking_users():
                 'booking_date': row[18],
                 'mahaprasad': row[19],
                 'created_at': row[20],
-                'updated_date': row[21],
-                'updated_by': row[22]
+                'is_active' : row[21],
+                'updated_date': row[22],
+                'updated_by': row[23]
             })
 
         # Convert the dictionary to a list of users with bookings
