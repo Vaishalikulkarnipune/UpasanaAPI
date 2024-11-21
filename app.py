@@ -237,7 +237,7 @@ def get_all_booking_users():
                     'anugrahit': row[14],
                     'gender': row[15],
                     'unique_family_code': row[16],
-                    'isadmin':row[17],
+                    'isadmin':row[24],
                     'bookings': []
                 }
             
