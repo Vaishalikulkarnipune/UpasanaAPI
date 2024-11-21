@@ -531,6 +531,11 @@ def get_user_by_id(user_id):
             'anugrahit': user[16],
             'gender': user[17],
             'unique_family_code': user[18],
+            'zone_code': user[19],
+            'isapprove': user[20],
+            'isactive': user[21],
+            'isadmin': user[22],
+            'note': user[23],
         }
 
         return jsonify(user_data), 200
