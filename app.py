@@ -248,7 +248,8 @@ def get_all_booking_users():
                 'created_at': row[20],
                 'is_active' : row[21],
                 'updated_date': row[22],
-                'updated_by': row[23]
+                'updated_by': row[23],
+                'user_id':user_id
             })
 
         # Convert the dictionary to a list of users with bookings
