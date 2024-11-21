@@ -202,7 +202,7 @@ def get_all_booking_users():
                 
                 bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
                 bookings.created_at,bookings.is_active,
-                bookings.updated_date, bookings.updated_by
+                bookings.updated_date, bookings.updated_by,users.isadmin
 
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
@@ -237,7 +237,7 @@ def get_all_booking_users():
                     'anugrahit': row[14],
                     'gender': row[15],
                     'unique_family_code': row[16],
-                    'isadmin':row[14],
+                    'isadmin':row[17],
                     'bookings': []
                 }
             
