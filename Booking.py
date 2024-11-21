@@ -1,7 +1,17 @@
 from datetime import datetime, timedelta
 from flask import jsonify
 from model import db, Booking, User
-from config import get_db_connection, release_db_connection
+import calendar
+
+# Helper function to get Saturdays for the Passed Dates Month
+def count_saturdays_in_month(date):
+    year = date.year
+    month = date.month
+    # Get all the days of the month
+    month_days = calendar.monthcalendar(year, month)
+    # Count the Saturdays
+    saturdays = sum(1 for week in month_days if week[calendar.SATURDAY] != 0)
+    return saturdays
 
 # Helper function to get all Saturdays from December 1 of the booking year
 def get_saturdays_for_year():
@@ -97,6 +107,13 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
                 return jsonify({"error": "Try another month, Zone A(East Pune) members can only book once per month."}), 400
             if zone_a_booking_count >= 1:
                 return jsonify({"error": "Try another month, Booking full for Zone A(East Pune) for this month"}), 400
+            
+            # Get number of Saturdays in the month of the booking_date
+            saturdays_count = count_saturdays_in_month(booking_date)
+
+            open_booking_in_month =saturdays_count-monthly_booking_count;
+            if open_booking_in_month == 1 and zone_a_booking_count==0:
+                return jsonify({"error": "Try another month, Remaining booking is reserved for Zone A(East Pune) for this month"}), 400
 
         elif zone_code == "B":
             if monthly_booking_count >= 2:  # Individual restriction
@@ -122,7 +139,9 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
     total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date,is_active=True).count()
     if total_bookings_on_saturday > 0:
         print("Upasana is booked for this Saturday.")
-        
+
+    
+
     # Create the new booking entry
     new_booking = Booking(
         user_id=user_id,
