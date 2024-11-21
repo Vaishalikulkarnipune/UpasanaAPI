@@ -122,7 +122,7 @@ def get_user_and_booking_details(user_id):
 
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
-            WHERE bookings.user_id = %s
+            WHERE is_active=true and bookings.user_id = %s
         """, (user_id,))
         
         result = cursor.fetchall()
@@ -642,7 +642,7 @@ def upasanaUsersSummary():
 # Get Booking dates for booking date must be gray
 @app.route('/bookingsDates', methods=['GET'])
 def get_all_booked_dates():
-    booked_dates = Booking.query.with_entities(Booking.booking_date).all()
+    booked_dates = Booking.query.with_entities(Booking.booking_date).filter(Booking.is_active == True).all()
     # Return dates in ISO format
     dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
     print("Booked Dates are:", dates)
