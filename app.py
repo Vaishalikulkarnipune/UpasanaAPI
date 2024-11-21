@@ -646,40 +646,43 @@ def get_all_booked_dates():
     print("Booked Dates are:", dates)
     return jsonify({"booked_dates": dates}), 200
 
-@app.route('/cancel_booking', methods=['POST'])
-def cancel_booking():
+@app.route('/update_booking', methods=['POST'])
+def update_booking():
     conn = None
     cursor = None
     try:
         data = request.json
         user_id = data.get('user_id')
         booking_id = data.get('booking_id')
+        is_active = data.get('is_active')  # Expecting True or False in the request payload
 
         # Validate the input
-        if not user_id or not booking_id:
-            return jsonify({"error": "User ID and Booking ID are required"}), 400
+        if not user_id or not booking_id or is_active is None:
+            return jsonify({"error": "User ID, Booking ID, and is_active status are required"}), 400
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if the booking exists and is active
+        # Check if the booking exists
         cursor.execute(
-            "SELECT id FROM bookings WHERE id = %s AND user_id = %s AND is_active = TRUE",
+            "SELECT id FROM bookings WHERE id = %s AND user_id = %s",
             (booking_id, user_id)
         )
         booking = cursor.fetchone()
 
         if not booking:
-            return jsonify({"error": "Booking not found or already cancelled"}), 404
+            return jsonify({"error": "Booking not found"}), 404
 
-        # Update the booking to set is_active to False
+        # Update the booking's is_active status
         cursor.execute(
-            "UPDATE bookings SET is_active = FALSE, updated_date = NOW() WHERE id = %s",
-            (booking_id,)
+            "UPDATE bookings SET is_active = %s, updated_date = NOW() WHERE id = %s",
+            (is_active, booking_id)
         )
         conn.commit()
 
-        return jsonify({"message": "Booking cancelled successfully"}), 200
+        # Set response message based on the is_active value
+        status = "activated" if is_active else "cancelled"
+        return jsonify({"message": f"Booking {status} successfully"}), 200
 
     except psycopg2.DatabaseError as db_err:
         logging.error(f"Database error: {str(db_err)}")
@@ -693,7 +696,6 @@ def cancel_booking():
             cursor.close()
         if conn is not None:
             release_db_connection(conn)
-
 
 @app.route('/health')
 def health_check():
