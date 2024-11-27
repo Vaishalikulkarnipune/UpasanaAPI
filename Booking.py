@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from flask import jsonify
 from model import db, Booking, User
 import calendar
+from sqlalchemy import func
+
 
 # Helper function to get Saturdays for the Passed Dates Month
 def count_saturdays_in_month(date):
@@ -151,9 +153,14 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
         return jsonify({"error": "Upasana is booked for this Saturday."}), 400
 
     # Check if the selected Saturday is already fully booked
-    total_bookings_on_saturday = Booking.query.filter_by(booking_date=booking_date,is_active=True).count()
+    total_bookings_on_saturday = Booking.query.filter(
+        func.date(Booking.booking_date) == booking_date.date(),  # Ensure comparison of date only
+        Booking.is_active == True
+    ).count()
+
     if total_bookings_on_saturday > 0:
         print("Upasana is booked for this Saturday.")
+        return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
 
     
 
