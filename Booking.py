@@ -154,7 +154,7 @@ def create_booking(user_id, booking_date, mahaprasad=False,enable_zone_restricti
 
     # Check if the selected Saturday is already fully booked
     total_bookings_on_saturday = Booking.query.filter(
-        func.date(Booking.booking_date) == booking_date.date(),  # Ensure comparison of date only
+        func.date(Booking.booking_date) == booking_date,  # Ensure comparison of date only
         Booking.is_active == True
     ).count()
 
