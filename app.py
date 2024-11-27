@@ -634,14 +634,15 @@ def upasanaUsersSummary():
     # Get total number of bookings
     total_bookings = Booking.query.count()
 
-    # Get total number of distinct users who have made bookings
-    total_booking_users = db.session.query(Booking.user_id).distinct().count()
+  # Get total number of distinct users who have made bookings
+    total_anugrahit_users = User.query.filter_by(anugrahit="yes").count()
+
 
     # Return the results as a JSON response
     return jsonify({
         "total_users": total_users,
         "total_bookings": total_bookings,
-        "total_booking_users": total_booking_users
+        "total_anugrahit_users": total_anugrahit_users
     }), 200
 
 # Get Booking dates for booking date must be gray
