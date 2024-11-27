@@ -610,7 +610,7 @@ def login():
             else:
                 return jsonify({"error": "Invalid password"}), 401
         else:
-            return jsonify({"error": "Mobile number not registered. Please register."}), 404
+            return jsonify({"error": "Entered invalid mobile number or not registered "}), 404
 
     except psycopg2.DatabaseError as db_err:
         logging.error(f"Database error: {str(db_err)}")
