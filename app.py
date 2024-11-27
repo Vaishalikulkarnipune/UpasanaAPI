@@ -206,6 +206,7 @@ def get_all_booking_users():
 
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
+                       order by booking_date asc
         """)
 
         result = cursor.fetchall()
@@ -632,7 +633,7 @@ def upasanaUsersSummary():
     total_users = User.query.count()
 
     # Get total number of bookings
-    total_bookings = Booking.query.count()
+    total_bookings = Booking.query.filter_by(is_active=True).count()
 
   # Get total number of distinct users who have made bookings
     total_anugrahit_users = User.query.filter_by(anugrahit="yes").count()
