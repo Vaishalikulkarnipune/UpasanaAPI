@@ -171,7 +171,6 @@ def add_prasad_count():
         # Extracting the required fields from the request
         event_id = data.get('event_id')
         user_id = data.get('user_id')
-        date = data.get('date')
         prasad_afternoon = data.get('prasad_afternoon')
         prasad_evening = data.get('prasad_evening')
         next_day_prasad_afternoon = data.get('next_day_prasad_afternoon')
@@ -179,7 +178,7 @@ def add_prasad_count():
         nidhi = data.get('nidhi')
 
         # Validation checks
-        if not all([event_id, user_id, date, prasad_afternoon, prasad_evening, next_day_prasad_afternoon, next_day_prasad_evening, nidhi]):
+        if not all([event_id, user_id, prasad_afternoon, prasad_evening, next_day_prasad_afternoon, next_day_prasad_evening, nidhi]):
             return jsonify({"error": "Missing required fields"}), 400
 
         # Ensure numeric values are valid
@@ -210,14 +209,14 @@ def add_prasad_count():
         # Insert query for prasadCount
         insert_query = """
         INSERT INTO prasadCount (
-            EventId, UserId, date, prasadAfternoon, prasadEvening, 
+            EventId, UserId, prasadAfternoon, prasadEvening, 
             nextDayPrasadAfternoon, nextDayPrasadEvening, Nidhi, created_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s,CURRENT_TIMESTAMP)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s,CURRENT_TIMESTAMP)
         """
 
         # Execute the query
         cursor.execute(insert_query, (
-            event_id, user_id, date, prasad_afternoon, prasad_evening,
+            event_id, user_id, prasad_afternoon, prasad_evening,
             next_day_prasad_afternoon, next_day_prasad_evening, nidhi
         ))
 
@@ -248,7 +247,6 @@ def update_prasad_count(record_id):
         # Extract the fields to be updated
         event_id = data.get('event_id')
         user_id = data.get('user_id')
-        date = data.get('date')
         prasad_afternoon = data.get('prasad_afternoon')
         prasad_evening = data.get('prasad_evening')
         next_day_prasad_afternoon = data.get('next_day_prasad_afternoon')
@@ -256,7 +254,7 @@ def update_prasad_count(record_id):
         nidhi = data.get('nidhi')
 
         # Validation: Ensure at least one field is provided
-        if not any([event_id, user_id, date, prasad_afternoon, prasad_evening, next_day_prasad_afternoon, next_day_prasad_evening, nidhi]):
+        if not any([event_id, user_id, prasad_afternoon, prasad_evening, next_day_prasad_afternoon, next_day_prasad_evening, nidhi]):
             return jsonify({"error": "No fields provided for update"}), 400
 
         # Connect to the database
@@ -284,9 +282,6 @@ def update_prasad_count(record_id):
             update_fields.append("UserId = %s")
             update_values.append(user_id)
 
-        if date:
-            update_fields.append("date = %s")
-            update_values.append(date)
 
         if prasad_afternoon is not None:
             update_fields.append("prasadAfternoon = %s")
@@ -347,7 +342,7 @@ def list_prasad_counts():
 
         # Query to retrieve all records from prasadCount table
         query = """
-        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name, pc.date, 
+        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name, 
                pc.prasadAfternoon, pc.prasadEvening, pc.nextDayPrasadAfternoon, pc.nextDayPrasadEvening, pc.Nidhi
         FROM prasadCount pc
         INNER JOIN event e ON pc.EventId = e.EventId
@@ -368,7 +363,6 @@ def list_prasad_counts():
                 "event_name": row[2],
                 "user_id": row[3],
                 "user_name": f"{row[4]} {row[5]}",
-                "date": row[6].strftime("%Y-%m-%d"),
                 "prasad_afternoon": row[7],
                 "prasad_evening": row[8],
                 "next_day_prasad_afternoon": row[9],
@@ -402,7 +396,7 @@ def get_prasad_by_id(prasad_id):
 
         # Query to retrieve the record for the specific prasad_id
         query = """
-        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name, pc.date, 
+        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name, 
                pc.prasadAfternoon, pc.prasadEvening, pc.nextDayPrasadAfternoon, pc.nextDayPrasadEvening, pc.Nidhi
         FROM prasadCount pc
         INNER JOIN event e ON pc.EventId = e.EventId
@@ -425,7 +419,6 @@ def get_prasad_by_id(prasad_id):
             "event_name": result[2],
             "user_id": result[3],
             "user_name": f"{result[4]} {result[5]}",
-            "date": result[6].strftime("%Y-%m-%d"),
             "prasad_afternoon": result[7],
             "prasad_evening": result[8],
             "next_day_prasad_afternoon": result[9],
