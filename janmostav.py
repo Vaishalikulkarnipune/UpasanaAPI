@@ -342,7 +342,7 @@ def list_prasad_counts():
 
         # Query to retrieve all records from prasadCount table
         query = """
-        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name, 
+        SELECT pc.id, pc.EventId, e.EventName, pc.UserId, u.first_name, u.last_name,
                pc.prasadAfternoon, pc.prasadEvening, pc.nextDayPrasadAfternoon, pc.nextDayPrasadEvening, pc.Nidhi
         FROM prasadCount pc
         INNER JOIN event e ON pc.EventId = e.EventId
@@ -363,11 +363,11 @@ def list_prasad_counts():
                 "event_name": row[2],
                 "user_id": row[3],
                 "user_name": f"{row[4]} {row[5]}",
-                "prasad_afternoon": row[7],
-                "prasad_evening": row[8],
-                "next_day_prasad_afternoon": row[9],
-                "next_day_prasad_evening": row[10],
-                "nidhi": row[11]
+                "prasad_afternoon": row[6],
+                "prasad_evening": row[7],
+                "next_day_prasad_afternoon": row[8],
+                "next_day_prasad_evening": row[9],
+                "nidhi": row[10]
             })
 
         return jsonify(prasad_counts), 200
