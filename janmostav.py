@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify,Flask
 import psycopg2
 import logging
 from config import get_db_connection, release_db_connection  # Ensure this module handles DB connections.
-from janmostav import janmostav_bp  # Import the janmostav blueprint
 
 app = Flask(__name__)
 # Define a blueprint for janmostav routes
