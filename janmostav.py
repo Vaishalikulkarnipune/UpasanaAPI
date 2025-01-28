@@ -419,11 +419,11 @@ def get_prasad_by_id(prasad_id):
             "event_name": result[2],
             "user_id": result[3],
             "user_name": f"{result[4]} {result[5]}",
-            "prasad_afternoon": result[7],
-            "prasad_evening": result[8],
-            "next_day_prasad_afternoon": result[9],
-            "next_day_prasad_evening": result[10],
-            "nidhi": result[11]
+            "prasad_afternoon": result[6],
+            "prasad_evening": result[7],
+            "next_day_prasad_afternoon": result[8],
+            "next_day_prasad_evening": result[9],
+            "nidhi": result[10]
         }
 
         return jsonify(prasad_details), 200
