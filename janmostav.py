@@ -347,7 +347,7 @@ def list_prasad_counts():
         FROM prasadCount pc
         INNER JOIN event e ON pc.EventId = e.EventId
         INNER JOIN users u ON pc.UserId = u.id
-        ORDER BY pc.date, pc.id;
+        ORDER BY pc.id;
         """
 
         # Execute the query
