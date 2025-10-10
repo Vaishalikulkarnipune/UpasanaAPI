@@ -9,6 +9,7 @@ import re
 from flask_cors import CORS
 import logging
 from janmostav import janmostav_bp  # Import the janmostav blueprint
+from sunday_booking import create_sunday_booking
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -103,6 +104,40 @@ def get_all_bookings():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+# Sunday Booking Route 
+@app.route('/sunday/book', methods=['POST'])
+def sunday_book():
+    """
+    Handles Sunday booking requests.
+    Sunday booking is allowed only when all Saturday slots are full for the year.
+    """
+    # Fetch the feature toggle settings for 'enable_booking'
+    feature_toggle = get_feature_toggle('enable_booking')
+
+    # If feature toggle is not found or the booking feature is disabled
+    if not feature_toggle or not feature_toggle.toggle_enabled:
+        return jsonify({"error": "Upasana booking is not available right now!"}), 400
+
+    # Get the data from the request
+    data = request.get_json()
+    user_id = data.get('user_id')
+    mahaprasad = data.get('mahaprasad', False)
+    booking_date_str = data.get('booking_date')
+
+    # Ensure booking_date_str is present
+    if not booking_date_str:
+        return jsonify({"error": "Booking date is required."}), 400
+
+    # Convert booking_date from string to date object
+    try:
+        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+    # Call the Sunday booking function
+    return create_sunday_booking(user_id, booking_date, mahaprasad)
+
 
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
 def get_user_and_booking_details(user_id):
