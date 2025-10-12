@@ -108,7 +108,7 @@ def create_sunday_booking(user_id, booking_date, mahaprasad=False):
 
     # 5️⃣ Check if the selected Sunday is fully booked (optional capacity check)
     total_bookings_on_sunday = SundayBooking.query.filter(
-        func.date(SundayBooking.booking_date) == booking_date.date(),
+        func.date(SundayBooking.booking_date) == booking_date,
         SundayBooking.is_active == True
     ).count()
 
@@ -123,7 +123,7 @@ def create_sunday_booking(user_id, booking_date, mahaprasad=False):
         booking_date=booking_date,
         mahaprasad=mahaprasad,
         created_at=datetime.utcnow(),
-        updated_date=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
         updated_by=user_id,
         is_active=True
     )
