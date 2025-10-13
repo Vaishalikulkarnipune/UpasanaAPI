@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User,FeatureToggle
+from model import db,Booking,User,FeatureToggle,ReferenceData
 from Booking import create_booking
 from datetime import datetime
 from config import get_db_connection, release_db_connection,Config
@@ -44,6 +44,21 @@ def get_feature_toggle(toggle_name):
     feature_toggle = FeatureToggle.query.filter_by(toggle_name=toggle_name).first()  # Fixed filter_by syntax
     return feature_toggle
 
+# Function to fetch the feature toggle
+@app.route('/refdata', methods=['GET'])
+def get_reference_data():
+    """
+    Fetches the reference data.
+    """
+    reference_data = ReferenceData.query.all()
+    data = []
+    for record in reference_data:
+        data.append({
+            'id': record.id,
+            'reference_key': record.reference_key,
+            'reference_value': record.reference_value
+        })
+    return jsonify(data)
 
 @app.route('/book', methods=['POST'])
 def book():

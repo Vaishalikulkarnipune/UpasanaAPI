@@ -81,3 +81,13 @@ class FeatureToggle(db.Model):
 
     def __repr__(self):
         return f"<FeatureToggle {self.toggle_name}: {self.toggle_enabled}>"
+
+class ReferenceData(db.Model):
+    __tablename__ = 'reference_data'
+
+    id = db.Column(db.Integer, primary_key=True)
+    reference_key = db.Column(db.String, unique=True, nullable=False)
+    reference_value = db.Column(db.String, nullable=False)
+
+    def __repr__(self):
+        return f"<ReferenceData {self.reference_key}: {self.reference_value}>"
