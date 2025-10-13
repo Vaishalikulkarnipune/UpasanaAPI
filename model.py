@@ -29,6 +29,7 @@ class User(db.Model):
     
     # Relationship with Booking
     bookings = db.relationship('Booking', back_populates='user')
+    sunday_bookings = db.relationship('SundayBooking', back_populates='user')
     
 class Booking(db.Model):
     __tablename__ = 'bookings'
@@ -43,6 +44,20 @@ class Booking(db.Model):
     is_active = db.Column(db.Boolean, default=True)
 
     user = db.relationship('User', back_populates='bookings')
+
+class SundayBooking(db.Model):
+    __tablename__ = 'sunday_bookings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    booking_date = db.Column(db.Date, nullable=False)
+    mahaprasad = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
+    user = db.relationship('User', back_populates='sunday_bookings')
 
 class Zone(db.Model):
     __tablename__ = 'Zone'

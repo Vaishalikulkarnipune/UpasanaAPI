@@ -9,6 +9,7 @@ import re
 from flask_cors import CORS
 import logging
 from janmostav import janmostav_bp  # Import the janmostav blueprint
+from sunday_booking import create_sunday_booking
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -103,6 +104,40 @@ def get_all_bookings():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+# Sunday Booking Route 
+@app.route('/sunday/book', methods=['POST'])
+def sunday_book():
+    """
+    Handles Sunday booking requests.
+    Sunday booking is allowed only when all Saturday slots are full for the year.
+    """
+    # Fetch the feature toggle settings for 'enable_booking'
+    feature_toggle = get_feature_toggle('enable_booking')
+
+    # If feature toggle is not found or the booking feature is disabled
+    if not feature_toggle or not feature_toggle.toggle_enabled:
+        return jsonify({"error": "Upasana booking is not available right now!"}), 400
+
+    # Get the data from the request
+    data = request.get_json()
+    user_id = data.get('user_id')
+    mahaprasad = data.get('mahaprasad', False)
+    booking_date_str = data.get('booking_date')
+
+    # Ensure booking_date_str is present
+    if not booking_date_str:
+        return jsonify({"error": "Booking date is required."}), 400
+
+    # Convert booking_date from string to date object
+    try:
+        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+    # Call the Sunday booking function
+    return create_sunday_booking(user_id, booking_date, mahaprasad)
+
 
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
 def get_user_and_booking_details(user_id):
@@ -275,6 +310,97 @@ def get_all_booking_users():
         if conn is not None:
             release_db_connection(conn)
 
+# Sunday Booking Members List
+@app.route('/sunday_bookings/users', methods=['GET'])
+def get_all_sunday_booking_users():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Query to get all users with their Sunday booking information
+        cursor.execute("""
+            SELECT 
+                users.id, users.first_name, users.middle_name, users.last_name, 
+                users.email, users.mobile_number, users.alternate_mobile_number, 
+                users.flat_no, users.full_address, users.area, users.landmark, 
+                users.city, users.state, users.pincode, users.anugrahit, 
+                users.gender, users.unique_family_code, users.isadmin,
+
+                sunday_bookings.id AS booking_id, 
+                sunday_bookings.booking_date, 
+                sunday_bookings.mahaprasad, 
+                sunday_bookings.created_at,
+                sunday_bookings.is_active,
+                sunday_bookings.updated_at, 
+                sunday_bookings.updated_by
+
+            FROM users
+            INNER JOIN sunday_bookings ON users.id = sunday_bookings.user_id
+            ORDER BY sunday_bookings.booking_date ASC
+        """)
+
+        result = cursor.fetchall()
+
+        if not result:
+            return jsonify({"message": "No users with Sunday bookings found"}), 404
+
+        # Structure data for JSON response
+        users_with_sunday_bookings = {}
+        for row in result:
+            user_id = row[0]
+            if user_id not in users_with_sunday_bookings:
+                users_with_sunday_bookings[user_id] = {
+                    'id': user_id,
+                    'first_name': row[1],
+                    'middle_name': row[2],
+                    'last_name': row[3],
+                    'email': row[4],
+                    'mobile_number': row[5],
+                    'alternate_mobile_number': row[6],
+                    'flat_no': row[7],
+                    'full_address': row[8],
+                    'area': row[9],
+                    'landmark': row[10],
+                    'city': row[11],
+                    'state': row[12],
+                    'pincode': row[13],
+                    'anugrahit': row[14],
+                    'gender': row[15],
+                    'unique_family_code': row[16],
+                    'isadmin': row[17],
+                    'bookings': []
+                }
+
+            # Append Sunday booking info
+            users_with_sunday_bookings[user_id]['bookings'].append({
+                'booking_id': row[18],
+                'booking_date': row[19],
+                'mahaprasad': row[20],
+                'created_at': row[21],
+                'is_active': row[22],
+                'updated_at': row[23],
+                'updated_by': row[24],
+                'user_id': user_id
+            })
+
+        # Convert the dictionary to a list for JSON output
+        response = {'users': list(users_with_sunday_bookings.values())}
+        
+        return jsonify(response), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            release_db_connection(conn)
 
 # Step 2: API route for inserting data into users table
 @app.route('/register', methods=['POST'])
