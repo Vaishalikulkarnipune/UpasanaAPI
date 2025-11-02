@@ -35,6 +35,14 @@ def validate_mobile_number(mobile_number):
     pattern = r'^\d{10}$'  # Assuming a 10-digit mobile number
     return re.match(pattern, mobile_number)
 
+# Function to safely get a reference value
+def get_reference_value(key):
+    """
+    Helper function to fetch a single reference value by key.
+    """
+    record = ReferenceData.query.filter_by(reference_key=key).first()
+    return record.reference_value if record else None
+
 # Function to fetch the feature toggle
 def get_feature_toggle(toggle_name):
     """
@@ -87,6 +95,30 @@ def book():
         booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+    # --- New Validation Logic Starts Here ---
+
+    # Fetch the allowed booking year from reference data
+    allowed_booking_year_str = get_reference_value('booking_year')
+    
+    if not allowed_booking_year_str:
+        # Handle case where booking_year is not configured in reference data
+        return jsonify({"error": "Booking year configuration is missing."}), 500
+
+    try:
+        # Convert the allowed year string to an integer
+        allowed_booking_year = int(allowed_booking_year_str)
+    except ValueError:
+        # Handle case where the stored reference value is not a valid integer year
+        return jsonify({"error": "Invalid booking year configuration format."}), 500
+
+    # Validate that the selected booking_date is within the allowed year
+    if booking_date.year != allowed_booking_year:
+        return jsonify({
+            "error": f"Bookings are only allowed for the year {allowed_booking_year}."
+        }), 400
+
+    # --- New Validation Logic Ends Here ---
 
     # Check if zone restrictions are enabled
     zone_restriction_toggle = get_feature_toggle('enable_zone_restriction')

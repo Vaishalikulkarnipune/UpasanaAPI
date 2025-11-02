@@ -2182,3 +2182,12 @@ venv/Scripts/pip3.exe
 venv/Scripts/python.exe
 venv/Scripts/pythonw.exe
 .vscode/launch.json
+__pycache__/app.cpython-311.pyc
+__pycache__/Booking.cpython-311.pyc
+__pycache__/janmostav.cpython-311.pyc
+__pycache__/janmostav.cpython-312.pyc
+__pycache__/model.cpython-311.pyc
+__pycache__/sunday_booking.cpython-311.pyc
+.vscode/settings.json
+config.log
+dummy.py
