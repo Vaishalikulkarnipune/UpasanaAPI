@@ -68,6 +68,120 @@ def get_reference_data():
         })
     return jsonify(data)
 
+# Function to fetch the feature toggle
+@app.route('/verify-reset', methods=['POST'])
+def verify_reset_data():
+    """
+    Verifies whether the user exists based on email, mobile number, and pincode.
+    Returns the user_id if found.
+    """
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        mobile_number = data.get('mobilenumber')
+        pincode = data.get('pincode')
+
+        if not email or not validate_email(email):
+            return jsonify({"error": "Invalid email format"}), 400
+        if not mobile_number or not validate_mobile_number(mobile_number):
+            return jsonify({"error": "Invalid mobile number format"}), 400
+        if not pincode or not pincode.isdigit():
+            return jsonify({"error": "Invalid pincode"}), 400
+
+        # Connect to DB
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Query user
+        cursor.execute("""
+            SELECT id FROM users
+            WHERE email = %s AND mobile_number = %s AND pincode = %s
+        """, (email, mobile_number, pincode))
+
+        user = cursor.fetchone()
+
+        if user:
+            user_id = user[0]
+            return jsonify({
+                "status": "success",
+                "message": "User verified successfully.",
+                "user_id": user_id
+            }), 200
+        else:
+            return jsonify({
+                "status": "fail",
+                "error": "No matching user found for provided details."
+            }), 404
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error in verify_reset_data: {str(e)}")
+        return jsonify({"error": "Unexpected error occurred"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            release_db_connection(conn)
+
+@app.route('/change-password', methods=['POST'])
+def change_password():
+    """
+    Changes the user's password based on user_id.
+    """
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        new_password = data.get('password')
+
+        if not user_id or not str(user_id).isdigit():
+            return jsonify({"error": "Invalid or missing user_id"}), 400
+        if not new_password or len(new_password.strip()) < 6:
+            return jsonify({"error": "Password must be at least 6 characters long"}), 400
+
+        # Hash password before storing (for security)
+        hashed_password = generate_password_hash(new_password)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if user exists
+        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Update password
+        cursor.execute("""
+            UPDATE users
+            SET password = %s, confirm_password = %s
+            WHERE id = %s
+        """, (hashed_password, hashed_password, user_id))
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Password updated successfully."
+        }), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error in change_password: {str(e)}")
+        return jsonify({"error": "Unexpected error occurred"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            release_db_connection(conn)
+
+
 @app.route('/book', methods=['POST'])
 def book():
     """
