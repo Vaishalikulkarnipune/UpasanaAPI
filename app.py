@@ -137,7 +137,7 @@ def change_password():
     try:
         data = request.get_json()
         user_id = data.get('user_id')
-        new_password = data.get('password')
+        new_password = data.get('new_password')
 
         if not user_id or not str(user_id).isdigit():
             return jsonify({"error": "Invalid or missing user_id"}), 400
