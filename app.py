@@ -357,6 +357,116 @@ def get_all_booking_users():
         if conn is not None:
             release_db_connection(conn)
 
+
+@app.route('/bookings/users/by-year', methods=['POST'])
+def get_booking_users_by_year():
+    conn = None
+    cursor = None
+    try:
+        logging.info("🔹 Received POST request at /bookings/users/by-year")
+
+        # Get JSON or form data
+        data = request.get_json(silent=True) or request.form
+        logging.info(f"📥 Incoming data: {data}")
+
+        year = data.get('year') if data else None
+        logging.info(f"📅 Filter year received: {year}")
+
+        if not year or not str(year).isdigit():
+            logging.warning("⚠️ Invalid or missing 'year' parameter.")
+            return jsonify({"error": "Valid 'year' parameter is required"}), 400
+
+        # Database connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        logging.info("✅ Database connection established successfully.")
+
+        # SQL Query
+        query = """
+            SELECT 
+                users.id, users.first_name, users.middle_name, users.last_name, 
+                users.email, users.mobile_number, users.alternate_mobile_number, 
+                users.flat_no, users.full_address, users.area, users.landmark, 
+                users.city, users.state, users.pincode, users.anugrahit, 
+                users.gender, users.unique_family_code,
+                bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
+                bookings.created_at, bookings.is_active,
+                bookings.updated_date, bookings.updated_by, users.isadmin
+            FROM users
+            INNER JOIN bookings ON users.id = bookings.user_id
+            WHERE EXTRACT(YEAR FROM bookings.booking_date) = %s
+            ORDER BY bookings.booking_date ASC
+        """
+
+        logging.debug(f"🧾 SQL Query: {query.strip()} | Params: {year}")
+        cursor.execute(query, (year,))
+        result = cursor.fetchall()
+        logging.info(f"✅ Query executed successfully. Rows fetched: {len(result)}")
+
+        if not result:
+            logging.info(f"ℹ️ No bookings found for year {year}")
+            return jsonify({"message": f"No bookings found for year {year}"}), 404
+
+        # Process results
+        users_with_bookings = {}
+        for row in result:
+            user_id = row[0]
+            if user_id not in users_with_bookings:
+                users_with_bookings[user_id] = {
+                    'id': user_id,
+                    'first_name': row[1],
+                    'middle_name': row[2],
+                    'last_name': row[3],
+                    'email': row[4],
+                    'mobile_number': row[5],
+                    'alternate_mobile_number': row[6],
+                    'flat_no': row[7],
+                    'full_address': row[8],
+                    'area': row[9],
+                    'landmark': row[10],
+                    'city': row[11],
+                    'state': row[12],
+                    'pincode': row[13],
+                    'anugrahit': row[14],
+                    'gender': row[15],
+                    'unique_family_code': row[16],
+                    'isadmin': row[24],
+                    'bookings': []
+                }
+
+            users_with_bookings[user_id]['bookings'].append({
+                'booking_id': row[17],
+                'booking_date': row[18],
+                'mahaprasad': row[19],
+                'created_at': row[20],
+                'is_active': row[21],
+                'updated_date': row[22],
+                'updated_by': row[23],
+                'user_id': user_id
+            })
+
+        response_data = {'year': year, 'users': list(users_with_bookings.values())}
+        logging.info(f"✅ Returning {len(users_with_bookings)} users for year {year}")
+        return jsonify(response_data), 200
+
+    except psycopg2.DatabaseError as db_err:
+        logging.exception(f"❌ Database error: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+
+    except Exception as e:
+        logging.exception(f"💥 Unexpected error: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+            logging.debug("🔒 Cursor closed.")
+        if conn is not None:
+            release_db_connection(conn)
+            logging.debug("🔓 Connection released.")
+
+
+
 # Sunday Booking Members List
 @app.route('/sunday_bookings/users', methods=['GET'])
 def get_all_sunday_booking_users():
