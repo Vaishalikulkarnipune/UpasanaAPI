@@ -161,7 +161,7 @@ def change_password():
             UPDATE users
             SET password = %s, confirm_password = %s
             WHERE id = %s
-        """, (hashed_password, hashed_password, user_id))
+        """, (new_password, new_password, user_id))
         conn.commit()
 
         return jsonify({
