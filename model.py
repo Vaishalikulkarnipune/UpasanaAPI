@@ -1,5 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
+
 
 # Initialize the SQLAlchemy instance
 db = SQLAlchemy()
@@ -91,3 +93,11 @@ class ReferenceData(db.Model):
 
     def __repr__(self):
         return f"<ReferenceData {self.reference_key}: {self.reference_value}>"
+
+
+class BookingLock(db.Model):
+    __tablename__ = "booking_locks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    booking_date = db.Column(db.Date, unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

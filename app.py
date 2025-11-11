@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User,FeatureToggle,ReferenceData
+from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock
 from Booking import create_booking
 from datetime import datetime
 from config import get_db_connection, release_db_connection,Config
