@@ -1063,7 +1063,7 @@ def update_booking():
         data = request.json
         user_id = data.get('user_id')
         booking_id = data.get('booking_id')
-        is_active = data.get('is_active')  # Expecting True or False in the request payload
+        is_active = data.get('is_active')  # Expecting True or False
 
         # Validate the input
         if not user_id or not booking_id or is_active is None:
@@ -1072,9 +1072,9 @@ def update_booking():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if the booking exists
+        # Verify booking exists and belongs to the user
         cursor.execute(
-            "SELECT id FROM bookings WHERE id = %s AND user_id = %s",
+            "SELECT booking_date FROM bookings WHERE id = %s AND user_id = %s",
             (booking_id, user_id)
         )
         booking = cursor.fetchone()
@@ -1082,14 +1082,26 @@ def update_booking():
         if not booking:
             return jsonify({"error": "Booking not found"}), 404
 
-        # Update the booking's is_active status
+        booking_date = booking[0]
+
+        # Update booking active/inactive
         cursor.execute(
             "UPDATE bookings SET is_active = %s, updated_date = NOW() WHERE id = %s",
             (is_active, booking_id)
         )
         conn.commit()
 
-        # Set response message based on the is_active value
+        # -----------------------------------------------
+        # 🧹 REMOVE LOCK IF BOOKING IS CANCELLED
+        # -----------------------------------------------
+        if is_active is False:
+            cursor.execute(
+                "DELETE FROM booking_lock WHERE booking_date = %s",
+                (booking_date,)
+            )
+            conn.commit()
+            print(f"🧹 Lock removed for {booking_date}")
+
         status = "activated" if is_active else "cancelled"
         return jsonify({"message": f"Booking {status} successfully"}), 200
 
@@ -1100,7 +1112,6 @@ def update_booking():
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
-        # Close cursor and connection
         if cursor is not None:
             cursor.close()
         if conn is not None:
