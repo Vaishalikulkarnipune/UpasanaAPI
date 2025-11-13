@@ -37,6 +37,16 @@ def get_saturdays_for_year():
 def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restriction=True):
     """Creates a booking safely with all business rules and race condition protection."""
 
+    # Helper to remove lock when needed
+    def remove_lock(date):
+        try:
+            BookingLock.query.filter_by(booking_date=date).delete()
+            db.session.commit()
+            print(f"🧹 Lock removed for {date}")
+        except:
+            db.session.rollback()
+            print("⚠️ Failed to remove lock")
+
     # --- Parse booking_date safely ---
     if isinstance(booking_date, str):
         try:
@@ -131,30 +141,38 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
     if enable_zone_restriction:
         if zone_code == "A":
             if monthly_booking_count >= 1:
+                remove_lock(booking_date)
                 return jsonify({"error": "Try another month, Zone A (East Pune) can only book once per month."}), 400
             if zone_a_booking_count >= 1:
+                remove_lock(booking_date)
                 return jsonify({"error": "Try another month, Zone A (East Pune) full for this month."}), 400
 
         elif zone_code == "B":
             if monthly_booking_count >= 2:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone B (Rest of Pune) limit reached for this month."}), 400
             if zone_b_booking_count >= 2:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone B (Rest of Pune) full for this month."}), 400
 
             saturdays_count = count_saturdays_in_month(booking_date)
             open_booking_in_month = saturdays_count - all_monthly_booking_count
             if open_booking_in_month == 1 and zone_a_booking_count == 0:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone B (Rest of Pune) full for this month."}), 400
 
         elif zone_code == "C":
             if monthly_booking_count >= 2:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone C (PCMC) limit reached for this month."}), 400
             if zone_c_booking_count >= 2:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone C (PCMC) full for this month."}), 400
 
             saturdays_count = count_saturdays_in_month(booking_date)
             open_booking_in_month = saturdays_count - all_monthly_booking_count
             if open_booking_in_month == 1 and zone_a_booking_count == 0:
+                remove_lock(booking_date)
                 return jsonify({"error": "Zone C (PCMC) full for this month."}), 400
 
     # =======================================================
@@ -164,6 +182,7 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
         user_id=user_id, booking_date=booking_date, is_active=True
     ).first()
     if existing_booking_on_saturday:
+        remove_lock(booking_date)
         return jsonify({"error": "Upasana already booked for this Saturday."}), 400
 
     total_bookings_on_saturday = Booking.query.filter(
@@ -171,7 +190,7 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
     ).count()
 
     if total_bookings_on_saturday > 0:
-        print("⚠️ Upasana is already booked for this Saturday.")
+        remove_lock(booking_date)
         return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
 
     # =======================================================
@@ -199,38 +218,26 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
 
     except IntegrityError as e:
         db.session.rollback()
-        print("⚠️ IntegrityError (possible duplicate insert):", e)
-        traceback.print_exc()
+        remove_lock(booking_date)
         return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
 
     except OperationalError as e:
         db.session.rollback()
-        print("⚠️ OperationalError:", e)
-        traceback.print_exc()
+        remove_lock(booking_date)
         return jsonify({"error": "Database temporarily busy. Please retry."}), 500
 
     except Exception as e:
         db.session.rollback()
-        print("⚠️ Unexpected Error:", e)
-        traceback.print_exc()
+        remove_lock(booking_date)
         return jsonify({"error": "Unexpected error during booking.", "details": str(e)}), 500
 
     finally:
-        # =======================================================
-        # 🧹 Conditional Lock Cleanup
-        # =======================================================
         try:
-            # If no booking exists for this date, cleanup the lock
             existing = Booking.query.filter_by(
                 booking_date=booking_date, is_active=True
             ).first()
 
             if not existing:
-                print(f"🧹 Removing lock for {booking_date} (no active booking found)")
-                db.session.delete(lock)
-                db.session.commit()
-            else:
-                print(f"🔒 Keeping lock for {booking_date} (booking confirmed)")
-        except Exception as cleanup_err:
-            db.session.rollback()
-            print(f"⚠️ Lock cleanup failed for {booking_date}: {cleanup_err}")
+                remove_lock(booking_date)
+        except:
+            pass
