@@ -72,19 +72,16 @@ def get_reference_data():
 @app.route('/verify-reset', methods=['POST'])
 def verify_reset_data():
     """
-    Verifies whether the user exists based on email, mobile number, and pincode.
+    Verifies whether the user exists based on mobile number, and pincode.
     Returns the user_id if found.
     """
     conn = None
     cursor = None
     try:
         data = request.get_json()
-        email = data.get('email')
         mobile_number = data.get('mobilenumber')
         pincode = data.get('pincode')
-
-        if not email or not validate_email(email):
-            return jsonify({"error": "Invalid email format"}), 400
+        
         if not mobile_number or not validate_mobile_number(mobile_number):
             return jsonify({"error": "Invalid mobile number format"}), 400
         if not pincode or not pincode.isdigit():
@@ -97,8 +94,8 @@ def verify_reset_data():
         # Query user
         cursor.execute("""
             SELECT id FROM users
-            WHERE email = %s AND mobile_number = %s AND pincode = %s
-        """, (email, mobile_number, pincode))
+            WHERE  mobile_number = %s AND pincode = %s
+        """, (mobile_number, pincode))
 
         user = cursor.fetchone()
 
