@@ -1096,7 +1096,7 @@ def update_booking():
         # -----------------------------------------------
         if is_active is False:
             cursor.execute(
-                "DELETE FROM booking_lock WHERE booking_date = %s",
+                "DELETE FROM booking_locks WHERE booking_date = %s",
                 (booking_date,)
             )
             conn.commit()
