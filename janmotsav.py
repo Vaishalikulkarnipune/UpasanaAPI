@@ -223,3 +223,88 @@ def attendance_summary(user_id):
         })
 
     return jsonify(response)
+
+    # ---------------------------------------------------------
+# LIST ALL YEARS (ADMIN)
+# ---------------------------------------------------------
+@router.get("/janmotsav/admin/year/list")
+def list_years():
+    try:
+        years = JanmotsavYear.query.filter_by(is_deleted=False).order_by(JanmotsavYear.year.desc()).all()
+
+        return jsonify({
+            "years": [
+                {
+                    "id": y.id,
+                    "year": y.year,
+                    "event_name": y.event_name,
+                    "is_current": y.is_current
+                }
+                for y in years
+            ]
+        })
+
+    except Exception as e:
+        print("Error loading year list:", e)
+        return jsonify({"error": "Failed to load year list"}), 500
+
+
+# ---------------------------------------------------------
+# GET YEAR DETAILS (ADMIN)
+# ---------------------------------------------------------
+@router.get("/janmotsav/admin/year/<int:year_id>")
+def get_year_details(year_id):
+    try:
+        year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
+
+        if not year:
+            return jsonify({"error": "Year not found"}), 404
+
+        days = JanmotsavDay.query.filter_by(year_id=year_id, is_deleted=False).order_by(JanmotsavDay.event_date).all()
+
+        return jsonify({
+            "id": year.id,
+            "year": year.year,
+            "event_name": year.event_name,
+            "is_current": year.is_current,
+            "location_name": year.location_name,
+            "location_url": year.location_url,
+            "facebook_url": year.facebook_url,
+            "youtube_url": year.youtube_url,
+            "instagram_url": year.instagram_url,
+            "custom_link_1": year.custom_link_1,
+            "custom_link_2": year.custom_link_2,
+            "description": year.description,
+            "days": [
+                {
+                    "id": d.id,
+                    "date": d.event_date.isoformat(),
+                    "breakfast": d.breakfast,
+                    "lunch": d.lunch,
+                    "evesnacks": d.evesnacks,
+                    "dinner": d.dinner
+                }
+                for d in days
+            ]
+        })
+
+    except Exception as e:
+        print("Error getting year details:", e)
+        return jsonify({"error": "Failed to load year details"}), 500
+
+@router.delete("/janmotsav/admin/year/delete/<int:year_id>")
+def delete_year(year_id):
+    try:
+        year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
+        if not year:
+            return jsonify({"error": "Year not found"}), 404
+
+        year.is_deleted = True
+        db.session.commit()
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print("Error deleting year:", e)
+        db.session.rollback()
+        return jsonify({"error": "Failed to delete year"}), 500
