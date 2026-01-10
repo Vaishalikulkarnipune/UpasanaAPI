@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import re
 from flask_cors import CORS
 import logging
-from janmostav import janmostav_bp  # Import the janmostav blueprint
+from janmotsav import router as janmotsav_bp
 from sunday_booking import create_sunday_booking
 
 # Set up basic logging configuration
@@ -19,7 +19,7 @@ app.config["DEBUG"] = True  # This enables debug mode
 app.config.from_object(Config)
 
 # Register the janmostav blueprint
-app.register_blueprint(janmostav_bp, url_prefix='/janmostav')
+app.register_blueprint(janmotsav_bp, url_prefix="/janmotsav")
 # Initialize SQLAlchemy with app
 db.init_app(app)
 # Configure logging to ensure all logs are captured
