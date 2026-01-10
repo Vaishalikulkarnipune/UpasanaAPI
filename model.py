@@ -1,6 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+
+
 
 db = SQLAlchemy()
 
@@ -124,61 +127,97 @@ class BookingLock(db.Model):
 # ---------------------------------------------------
 # JANMOTSAV MODELS
 # ---------------------------------------------------
+# ===========================================================
+# JANMOTSAV YEAR TABLE
+# ===========================================================
 class JanmotsavYear(db.Model):
     __tablename__ = "janmotsav_years"
 
-    id = db.Column(db.Integer, primary_key=True)
-    year = db.Column(db.Integer, unique=True, nullable=False)
-    event_name = db.Column(db.String(255))
-    is_current = db.Column(db.Boolean, default=False)
+    id = Column(Integer, primary_key=True)
+    year = Column(Integer, unique=True, nullable=False)
 
-    location_name = db.Column(db.String(255))
-    location_url = db.Column(db.Text)
-    facebook_url = db.Column(db.Text)
-    youtube_url = db.Column(db.Text)
-    instagram_url = db.Column(db.Text)
-    custom_link_1 = db.Column(db.Text)
-    custom_link_2 = db.Column(db.Text)
-    description = db.Column(db.Text)
+    # Soft delete
+    is_deleted = Column(Boolean, default=False)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Current year flag
+    is_current = Column(Boolean, default=False)
 
-    days = db.relationship("JanmotsavDay", back_populates="year_info")
+    # Lock editing of days & attendance
+    is_locked = Column(Boolean, default=False)
+
+    # Event details
+    event_name = Column(String(255))
+    location_name = Column(String(255))
+    location_url = Column(String(255))
+    facebook_url = Column(String(255))
+    youtube_url = Column(String(255))
+    instagram_url = Column(String(255))
+    custom_link_1 = Column(String(255))
+    custom_link_2 = Column(String(255))
+    description = Column(String(2000))
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    days = relationship("JanmotsavDay", back_populates="year_info")
+    attendance = relationship("JanmotsavAttendance", back_populates="year_info")
+
+    def __repr__(self):
+        return f"<JanmotsavYear {self.year}>"
 
 
+# ===========================================================
+# JANMOTSAV DAY TABLE
+# ===========================================================
 class JanmotsavDay(db.Model):
     __tablename__ = "janmotsav_days"
 
-    id = db.Column(db.Integer, primary_key=True)
-    year_id = db.Column(db.Integer, db.ForeignKey("janmotsav_years.id"))
-    event_date = db.Column(db.Date, nullable=False)
+    id = Column(Integer, primary_key=True)
+    year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
 
-    breakfast = db.Column(db.Boolean, default=False)
-    lunch = db.Column(db.Boolean, default=False)
-    evesnacks = db.Column(db.Boolean, default=False)
-    dinner = db.Column(db.Boolean, default=False)
+    # Soft delete
+    is_deleted = Column(Boolean, default=False)
 
-    year_info = db.relationship("JanmotsavYear", back_populates="days")
+    event_date = Column(Date, nullable=False)
+
+    breakfast = Column(Boolean, default=False)
+    lunch = Column(Boolean, default=False)
+    evesnacks = Column(Boolean, default=False)
+    dinner = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    year_info = relationship("JanmotsavYear", back_populates="days")
+    attendance = relationship("JanmotsavAttendance", back_populates="day_info")
+
+    def __repr__(self):
+        return f"<JanmotsavDay {self.event_date}>"
 
 
+# ===========================================================
+# JANMOTSAV ATTENDANCE TABLE
+# ===========================================================
 class JanmotsavAttendance(db.Model):
     __tablename__ = "janmotsav_attendance"
 
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, nullable=False)
-    year_id = db.Column(db.Integer, nullable=False)
-    day_id = db.Column(db.Integer, db.ForeignKey("janmotsav_days.id"))
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
+    day_id = Column(Integer, ForeignKey("janmotsav_days.id"), nullable=False)
 
-    breakfast_count = db.Column(db.Integer, default=0)
-    lunch_count = db.Column(db.Integer, default=0)
-    evesnacks_count = db.Column(db.Integer, default=0)
-    dinner_count = db.Column(db.Integer, default=0)
+    breakfast_count = Column(Integer, default=0)
+    lunch_count = Column(Integer, default=0)
+    evesnacks_count = Column(Integer, default=0)
+    dinner_count = Column(Integer, default=0)
+    seva_nidhi = Column(Boolean, default=False)
 
-    seva_nidhi = db.Column(db.Boolean, default=False)
+    # Soft delete
+    is_deleted = Column(Boolean, default=False)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "year_id", "day_id", name="unique_attendance"),
-    )
+    year_info = relationship("JanmotsavYear", back_populates="attendance")
+    day_info = relationship("JanmotsavDay", back_populates="attendance")
+
+    def __repr__(self):
+        return f"<Attendance user={self.user_id}, day={self.day_id}>"
