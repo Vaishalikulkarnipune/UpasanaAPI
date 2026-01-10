@@ -199,19 +199,16 @@ def add_days():
 # ATTENDANCE SUMMARY PER USER
 # ==========================================================
 @router.get("/janmotsav/attendance/summary/<int:user_id>")
-def attendance_summary(user_id):
+def attendance_summary_user(user_id):
     """Return attendance summary for a user for the current Janmotsav year."""
     year = JanmotsavYear.query.filter_by(is_current=True, is_deleted=False).first()
 
     if not year:
         return jsonify({"error": "No Janmotsav year found"}), 404
 
-    days = (
-        JanmotsavDay.query
-            .filter_by(year_id=year.id, is_deleted=False)
-            .order_by(JanmotsavDay.event_date)
-            .all()
-    )
+    days = JanmotsavDay.query.filter_by(
+        year_id=year.id, is_deleted=False
+    ).order_by(JanmotsavDay.event_date).all()
 
     response = {
         "year": year.year,
@@ -236,19 +233,19 @@ def attendance_summary(user_id):
     return jsonify(response)
 
 @router.get("/janmotsav/attendance/summary")
-def attendance_summary():
-    """Return attendance summary for ALL USERS for the current Janmotsav year."""
-    year = JanmotsavYear.query.filter_by(is_current=True, is_deleted=False).first()
+def attendance_summary_all():
+    """Return attendance summary for all users for the current Janmotsav year."""
+    
+    year = JanmotsavYear.query.filter_by(
+        is_current=True, is_deleted=False
+    ).first()
 
     if not year:
-        return jsonify({"error": "No Janmotsav year found"}), 404
+        return jsonify({"error": "No current Janmotsav year found"}), 404
 
-    days = (
-        JanmotsavDay.query
-            .filter_by(year_id=year.id, is_deleted=False)
-            .order_by(JanmotsavDay.event_date)
-            .all()
-    )
+    days = JanmotsavDay.query.filter_by(
+        year_id=year.id, is_deleted=False
+    ).order_by(JanmotsavDay.event_date).all()
 
     response = {
         "year": year.year,
@@ -266,6 +263,7 @@ def attendance_summary():
         ).filter_by(day_id=day.id, is_deleted=False).first()
 
         response["days"].append({
+            "date": day.event_date.strftime("%Y-%m-%d"),
             "dateFormatted": day.event_date.strftime("%d %b"),
             "breakfast_total": totals[0] or 0,
             "lunch_total": totals[1] or 0,
