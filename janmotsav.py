@@ -167,11 +167,15 @@ def create_or_update_year():
 # ==========================================================
 @router.post("/janmotsav/admin/days/add")
 def add_days():
-    """Insert days for a specific Janmotsav year."""
+    """Replace old days with the new list for the given year."""
     data = request.json
     year_id = data["year_id"]
 
     try:
+        # DELETE EXISTING DAYS FOR THIS YEAR
+        JanmotsavDay.query.filter_by(year_id=year_id).delete()
+
+        # INSERT NEW DAYS
         for d in data["days"]:
             new_day = JanmotsavDay(
                 year_id=year_id,
@@ -190,7 +194,6 @@ def add_days():
         db.session.rollback()
         print("Error adding days:", e)
         return jsonify({"error": "Failed to add days"}), 500
-
 
 # ==========================================================
 # ATTENDANCE SUMMARY PER USER
