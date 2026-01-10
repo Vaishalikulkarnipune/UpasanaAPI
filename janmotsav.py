@@ -235,6 +235,47 @@ def attendance_summary(user_id):
 
     return jsonify(response)
 
+@router.get("/janmotsav/attendance/summary")
+def attendance_summary():
+    """Return attendance summary for ALL USERS for the current Janmotsav year."""
+    year = JanmotsavYear.query.filter_by(is_current=True, is_deleted=False).first()
+
+    if not year:
+        return jsonify({"error": "No Janmotsav year found"}), 404
+
+    days = (
+        JanmotsavDay.query
+            .filter_by(year_id=year.id, is_deleted=False)
+            .order_by(JanmotsavDay.event_date)
+            .all()
+    )
+
+    response = {
+        "year": year.year,
+        "event_name": year.event_name,
+        "days": []
+    }
+
+    for day in days:
+        totals = db.session.query(
+            db.func.sum(JanmotsavAttendance.breakfast_count),
+            db.func.sum(JanmotsavAttendance.lunch_count),
+            db.func.sum(JanmotsavAttendance.evesnacks_count),
+            db.func.sum(JanmotsavAttendance.dinner_count),
+            db.func.bool_or(JanmotsavAttendance.seva_nidhi)
+        ).filter_by(day_id=day.id, is_deleted=False).first()
+
+        response["days"].append({
+            "dateFormatted": day.event_date.strftime("%d %b"),
+            "breakfast_total": totals[0] or 0,
+            "lunch_total": totals[1] or 0,
+            "evesnacks_total": totals[2] or 0,
+            "dinner_total": totals[3] or 0,
+            "seva_nidhi_any": totals[4] or False,
+        })
+
+    return jsonify(response)
+
 
 # ==========================================================
 # LIST ALL YEARS (ADMIN)
