@@ -76,6 +76,7 @@ def save_attendance():
                 existing.dinner_count = entry.get("dinner", 0)
                 existing.seva_nidhi = entry.get("seva_nidhi", False)
                 existing.updated_at = datetime.utcnow()
+                existing.seva_nidhi_amount = entry.get("seva_nidhi_amount", 0)
 
             else:
                 # Insert new attendance
@@ -88,6 +89,7 @@ def save_attendance():
                     evesnacks_count=entry.get("evesnacks", 0),
                     dinner_count=entry.get("dinner", 0),
                     seva_nidhi=entry.get("seva_nidhi", False),
+                    seva_nidhi_amount = entry.get("seva_nidhi_amount", 0),
                 )
                 db.session.add(rec)
 
@@ -228,6 +230,8 @@ def attendance_summary_user(user_id):
             "evesnacks": att.evesnacks_count if att else 0,
             "dinner": att.dinner_count if att else 0,
             "seva_nidhi": att.seva_nidhi if att else False,
+            "seva_nidhi_amount": att.seva_nidhi_amount if att else 0,
+
         })
 
     return jsonify(response)
@@ -259,7 +263,8 @@ def attendance_summary_all():
             db.func.sum(JanmotsavAttendance.lunch_count),
             db.func.sum(JanmotsavAttendance.evesnacks_count),
             db.func.sum(JanmotsavAttendance.dinner_count),
-            db.func.bool_or(JanmotsavAttendance.seva_nidhi)
+            db.func.bool_or(JanmotsavAttendance.seva_nidhi),
+            db.func.sum(JanmotsavAttendance.seva_nidhi_amount)  # SUM amount
         ).filter_by(day_id=day.id, is_deleted=False).first()
 
         response["days"].append({
@@ -270,6 +275,7 @@ def attendance_summary_all():
             "evesnacks_total": totals[2] or 0,
             "dinner_total": totals[3] or 0,
             "seva_nidhi_any": totals[4] or False,
+            "seva_nidhi_total": totals[5] or 0     # ⭐ NEW FIELD ADDED
         })
 
     return jsonify(response)

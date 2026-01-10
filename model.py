@@ -209,6 +209,8 @@ class JanmotsavAttendance(db.Model):
     evesnacks_count = Column(Integer, default=0)
     dinner_count = Column(Integer, default=0)
     seva_nidhi = Column(Boolean, default=False)
+    seva_nidhi_amount = db.Column(db.Integer, default=0)  # in INR
+
 
     # Soft delete
     is_deleted = Column(Boolean, default=False)
