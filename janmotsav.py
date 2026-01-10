@@ -104,38 +104,62 @@ def save_attendance():
 # CREATE YEAR (ADMIN)
 # ==========================================================
 @router.post("/janmotsav/admin/year/create")
-def create_year():
-    """Insert a NEW Janmotsav year."""
+def create_or_update_year():
+    """Create or Update a Janmotsav year."""
     data = request.json
+    year_id = data.get("id")  # if id present → update
 
     try:
         # If new year is marked current, unset previous ones
         if data.get("is_current"):
             JanmotsavYear.query.update({"is_current": False})
 
-        new_year = JanmotsavYear(
-            year=data["year"],
-            is_current=data.get("is_current", False),
-            event_name=data.get("event_name"),
-            location_name=data.get("location_name"),
-            location_url=data.get("location_url"),
-            facebook_url=data.get("facebook_url"),
-            youtube_url=data.get("youtube_url"),
-            instagram_url=data.get("instagram_url"),
-            custom_link_1=data.get("custom_link_1"),
-            custom_link_2=data.get("custom_link_2"),
-            description=data.get("description"),
-        )
+        if year_id:
+            # ---- UPDATE MODE ----
+            year = JanmotsavYear.query.get(year_id)
+            if not year:
+                return jsonify({"error": "Year not found"}), 404
 
-        db.session.add(new_year)
-        db.session.commit()
+            year.year = data.get("year", year.year)
+            year.is_current = data.get("is_current", year.is_current)
+            year.event_name = data.get("event_name", year.event_name)
+            year.location_name = data.get("location_name", year.location_name)
+            year.location_url = data.get("location_url", year.location_url)
+            year.facebook_url = data.get("facebook_url", year.facebook_url)
+            year.youtube_url = data.get("youtube_url", year.youtube_url)
+            year.instagram_url = data.get("instagram_url", year.instagram_url)
+            year.custom_link_1 = data.get("custom_link_1", year.custom_link_1)
+            year.custom_link_2 = data.get("custom_link_2", year.custom_link_2)
+            year.description = data.get("description", year.description)
 
-        return jsonify({"status": "success", "year_id": new_year.id})
+            db.session.commit()
+            return jsonify({"status": "success", "message": "Year updated", "year_id": year.id})
+
+        else:
+            # ---- CREATE MODE ----
+            new_year = JanmotsavYear(
+                year=data["year"],
+                is_current=data.get("is_current", False),
+                event_name=data.get("event_name"),
+                location_name=data.get("location_name"),
+                location_url=data.get("location_url"),
+                facebook_url=data.get("facebook_url"),
+                youtube_url=data.get("youtube_url"),
+                instagram_url=data.get("instagram_url"),
+                custom_link_1=data.get("custom_link_1"),
+                custom_link_2=data.get("custom_link_2"),
+                description=data.get("description"),
+            )
+
+            db.session.add(new_year)
+            db.session.commit()
+
+            return jsonify({"status": "success", "message": "Year created", "year_id": new_year.id})
 
     except Exception as e:
         db.session.rollback()
-        print("Error creating year:", e)
-        return jsonify({"error": "Failed to create year"}), 500
+        print("Error creating/updating year:", e)
+        return jsonify({"error": "Failed to save year"}), 500
 
 
 # ==========================================================
