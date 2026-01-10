@@ -19,7 +19,7 @@ app.config["DEBUG"] = True  # This enables debug mode
 app.config.from_object(Config)
 
 # Register the janmostav blueprint
-app.register_blueprint(janmotsav_bp, url_prefix="/janmotsav")
+app.register_blueprint(janmotsav_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 # Configure logging to ensure all logs are captured
