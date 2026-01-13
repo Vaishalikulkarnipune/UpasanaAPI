@@ -61,19 +61,45 @@ def get_current_config():
     })
 
 
-
 # ==========================================================
-# SAVE ATTENDANCE
+# SAVE ATTENDANCE (NEW VERSION)
 # ==========================================================
 @router.post("/janmotsav/attendance/save")
 def save_attendance():
-    """Create or update attendance for the given user and year."""
+    """Create/update attendance per day + store seva_nidhi per user."""
     data = request.json
 
     user_id = data["user_id"]
     year_id = data["year_id"]
 
+    seva_nidhi = data.get("seva_nidhi", False)
+    seva_nidhi_amount = data.get("seva_nidhi_amount")
+    seva_nidhi_account_details = data.get("seva_nidhi_account_details")
+
     try:
+        # ======================================================
+        # 1️⃣ SAVE SEVA-NIDHI (USER-LEVEL DATA)
+        # ======================================================
+        if seva_nidhi:  # Only save if seva-nidhi is enabled
+            existing_payment = SevaNidhiPayment.query.filter_by(user_id=user_id).first()
+
+            if existing_payment:
+                # Update
+                existing_payment.seva_nidhi_amount = seva_nidhi_amount
+                existing_payment.seva_nidhi_account_details = seva_nidhi_account_details
+                existing_payment.updated_at = datetime.utcnow()
+            else:
+                # Create new
+                new_payment = SevaNidhiPayment(
+                    user_id=user_id,
+                    seva_nidhi_amount=seva_nidhi_amount,
+                    seva_nidhi_account_details=seva_nidhi_account_details,
+                )
+                db.session.add(new_payment)
+
+        # ======================================================
+        # 2️⃣ SAVE ATTENDANCE FOR EACH DAY
+        # ======================================================
         for entry in data["attendance"]:
             day_id = entry["day_id"]
 
@@ -87,12 +113,10 @@ def save_attendance():
                 existing.lunch_count = entry.get("lunch", 0)
                 existing.evesnacks_count = entry.get("evesnacks", 0)
                 existing.dinner_count = entry.get("dinner", 0)
-                existing.seva_nidhi = entry.get("seva_nidhi", False)
                 existing.updated_at = datetime.utcnow()
-                existing.seva_nidhi_amount = entry.get("seva_nidhi_amount", 0)
 
             else:
-                # Insert new attendance
+                # Insert new day attendance
                 rec = JanmotsavAttendance(
                     user_id=user_id,
                     year_id=year_id,
@@ -101,8 +125,6 @@ def save_attendance():
                     lunch_count=entry.get("lunch", 0),
                     evesnacks_count=entry.get("evesnacks", 0),
                     dinner_count=entry.get("dinner", 0),
-                    seva_nidhi=entry.get("seva_nidhi", False),
-                    seva_nidhi_amount = entry.get("seva_nidhi_amount", 0),
                 )
                 db.session.add(rec)
 
@@ -113,7 +135,6 @@ def save_attendance():
         db.session.rollback()
         print("Error saving attendance:", e)
         return jsonify({"error": "Failed to save attendance"}), 500
-
 
 # ==========================================================
 # CREATE YEAR (ADMIN)

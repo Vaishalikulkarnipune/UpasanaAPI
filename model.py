@@ -47,6 +47,12 @@ class User(db.Model):
     bookings = db.relationship('Booking', back_populates='user')
     sunday_bookings = db.relationship('SundayBooking', back_populates='user')
 
+    seva_nidhi_payment = db.relationship(
+        "SevaNidhiPayment",
+        uselist=False,
+        back_populates="user"
+    )
+
     def __repr__(self):
         return f"<User {self.first_name} {self.last_name}>"
 
@@ -219,6 +225,26 @@ class JanmotsavDay(db.Model):
     def __repr__(self):
         return f"<JanmotsavDay {self.event_date}>"
 
+# ---------------------------------------------------
+# Seva Nidhi Payment
+# ---------------------------------------------------
+class SevaNidhiPayment(db.Model):
+    __tablename__ = "seva_nidhi_payments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
+
+    seva_nidhi_amount = db.Column(db.Integer, nullable=True)
+    seva_nidhi_account_details = db.Column(db.String, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship to User table
+    user = db.relationship("User", back_populates="seva_nidhi_payment")
+
+    def __repr__(self):
+        return f"<SevaNidhiPayment user_id={self.user_id} amount={self.seva_nidhi_amount}>"
 
 # ---------------------------------------------------
 # JANMOTSAV ATTENDANCE
@@ -227,29 +253,24 @@ class JanmotsavAttendance(db.Model):
     __tablename__ = "janmotsav_attendance"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
-    day_id = Column(Integer, ForeignKey("janmotsav_days.id", ondelete="SET NULL"), nullable=True)
-
+    day_id = Column(Integer, ForeignKey("janmotsav_days.id"), nullable=False)
 
     breakfast_count = Column(Integer, default=0)
     lunch_count = Column(Integer, default=0)
     evesnacks_count = Column(Integer, default=0)
     dinner_count = Column(Integer, default=0)
-    seva_nidhi = Column(Boolean, default=False)
-    seva_nidhi_amount = Column(Integer, default=0)
 
     is_deleted = Column(Boolean, default=False)
-
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    year_info = relationship("JanmotsavYear", back_populates="attendance")
+    user = relationship("User")
     day_info = relationship("JanmotsavDay", back_populates="attendance")
 
     def __repr__(self):
-        return f"<Attendance user={self.user_id}, day={self.day_id}>"
-
+        return f"<JanmotsavAttendance user_id={self.user_id} day_id={self.day_id}>"
 
 # ---------------------------------------------------
 # PAYMENT TRACKING
