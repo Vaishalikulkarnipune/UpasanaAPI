@@ -1,9 +1,17 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    Text
+)
 from sqlalchemy.orm import relationship
-
-
 
 db = SQLAlchemy()
 
@@ -32,11 +40,15 @@ class User(db.Model):
     gender = db.Column(db.String(10), default='male')
     unique_family_code = db.Column(db.Integer, unique=True)
     zone_code = db.Column(db.String(50), nullable=False)
-    # ⭐ NEW FIELD replacing old isapprove
+
+    # ⭐ Canary user flag (replacing isapprove)
     is_canary_user = db.Column(db.Boolean, default=False)
 
     bookings = db.relationship('Booking', back_populates='user')
     sunday_bookings = db.relationship('SundayBooking', back_populates='user')
+
+    def __repr__(self):
+        return f"<User {self.first_name} {self.last_name}>"
 
 
 # ---------------------------------------------------
@@ -127,10 +139,7 @@ class BookingLock(db.Model):
 
 
 # ---------------------------------------------------
-# JANMOTSAV MODELS
-# ---------------------------------------------------
-# ---------------------------------------------------
-#  JANMOTSAV YEAR MODEL (UPDATED WITH UPI FIELDS)
+# JANMOTSAV YEAR MODEL
 # ---------------------------------------------------
 class JanmotsavYear(db.Model):
     __tablename__ = "janmotsav_years"
@@ -153,31 +162,32 @@ class JanmotsavYear(db.Model):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # New UPI fields
-    upi_id = Column(String(150))                     # e.g. ramdasi@oksbi
-    upi_name = Column(String(150))                   # UPI receiver name
-    upi_note = Column(String(255))                   # note visible in UPI app
-    upi_min_amount = Column(Numeric(10, 2))          # optional
-    upi_status = Column(Boolean, default=True)       # enable/disable UPI
+    upi_id = Column(String(150))
+    upi_name = Column(String(150))
+    upi_note = Column(String(255))
+    upi_min_amount = Column(Numeric(10, 2))
+    upi_status = Column(Boolean, default=True)
 
-    # One-to-many relationship → Year → Days
+    # Relationships
     days = relationship("JanmotsavDay", back_populates="year_info")
 
-    # One-to-many → Year → Payment Tracking
+    attendance = relationship("JanmotsavAttendance", back_populates="year_info")
+
     payments = relationship("YearPaymentTracking", back_populates="year")
 
     def __repr__(self):
         return f"<JanmotsavYear {self.year}>"
 
-# ===========================================================
-# JANMOTSAV DAY TABLE
-# ===========================================================
+
+# ---------------------------------------------------
+# JANMOTSAV DAY
+# ---------------------------------------------------
 class JanmotsavDay(db.Model):
     __tablename__ = "janmotsav_days"
 
     id = Column(Integer, primary_key=True)
     year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
 
-    # Soft delete
     is_deleted = Column(Boolean, default=False)
 
     event_date = Column(Date, nullable=False)
@@ -196,9 +206,9 @@ class JanmotsavDay(db.Model):
         return f"<JanmotsavDay {self.event_date}>"
 
 
-# ===========================================================
-# JANMOTSAV ATTENDANCE TABLE
-# ===========================================================
+# ---------------------------------------------------
+# JANMOTSAV ATTENDANCE
+# ---------------------------------------------------
 class JanmotsavAttendance(db.Model):
     __tablename__ = "janmotsav_attendance"
 
@@ -212,10 +222,8 @@ class JanmotsavAttendance(db.Model):
     evesnacks_count = Column(Integer, default=0)
     dinner_count = Column(Integer, default=0)
     seva_nidhi = Column(Boolean, default=False)
-    seva_nidhi_amount = db.Column(db.Integer, default=0)  # in INR
+    seva_nidhi_amount = Column(Integer, default=0)
 
-
-    # Soft delete
     is_deleted = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -227,8 +235,9 @@ class JanmotsavAttendance(db.Model):
     def __repr__(self):
         return f"<Attendance user={self.user_id}, day={self.day_id}>"
 
+
 # ---------------------------------------------------
-#  NEW: PAYMENT TRACKING TABLE
+# PAYMENT TRACKING
 # ---------------------------------------------------
 class YearPaymentTracking(db.Model):
     __tablename__ = "year_payment_tracking"
@@ -240,14 +249,13 @@ class YearPaymentTracking(db.Model):
 
     amount = Column(Numeric(10, 2))
     status = Column(String(20))           # SUCCESS / FAILURE / CANCELLED
-    txn_id = Column(String(120))          # txnId from UPI response
-    utr = Column(String(120))             # UTR (optional)
-    response_code = Column(String(10))    # 00 = success
-    raw_response = Column(Text)           # Entire callback string
+    txn_id = Column(String(120))
+    utr = Column(String(120))
+    response_code = Column(String(10))
+    raw_response = Column(Text)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relationship back to Year
     year = relationship("JanmotsavYear", back_populates="payments")
 
     def __repr__(self):
