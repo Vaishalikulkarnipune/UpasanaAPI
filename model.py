@@ -215,7 +215,8 @@ class JanmotsavAttendance(db.Model):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=False)
     year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
-    day_id = Column(Integer, ForeignKey("janmotsav_days.id"), nullable=False)
+    day_id = Column(Integer, ForeignKey("janmotsav_days.id", ondelete="SET NULL"), nullable=True)
+
 
     breakfast_count = Column(Integer, default=0)
     lunch_count = Column(Integer, default=0)
