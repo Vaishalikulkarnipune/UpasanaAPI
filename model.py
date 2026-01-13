@@ -41,13 +41,14 @@ class User(db.Model):
     unique_family_code = db.Column(db.Integer, unique=True)
     zone_code = db.Column(db.String(50), nullable=False)
 
-    # ⭐ Canary user flag (replacing isapprove)
+    # Canary User Flag
     is_canary_user = db.Column(db.Boolean, default=False)
 
-    bookings = db.relationship('Booking', back_populates='user')
-    sunday_bookings = db.relationship('SundayBooking', back_populates='user')
+    # Relations
+    bookings = relationship('Booking', back_populates='user')
+    sunday_bookings = relationship('SundayBooking', back_populates='user')
 
-    seva_nidhi_payment = db.relationship(
+    seva_nidhi_payment = relationship(
         "SevaNidhiPayment",
         uselist=False,
         back_populates="user"
@@ -72,7 +73,7 @@ class Booking(db.Model):
     updated_by = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
 
-    user = db.relationship('User', back_populates='bookings')
+    user = relationship('User', back_populates='bookings')
 
 
 class SundayBooking(db.Model):
@@ -87,7 +88,7 @@ class SundayBooking(db.Model):
     updated_by = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
 
-    user = db.relationship('User', back_populates='sunday_bookings')
+    user = relationship('User', back_populates='sunday_bookings')
 
 
 # ---------------------------------------------------
@@ -145,7 +146,7 @@ class BookingLock(db.Model):
 
 
 # ---------------------------------------------------
-# JANMOTSAV YEAR MODEL
+# JANMOTSAV YEAR
 # ---------------------------------------------------
 class JanmotsavYear(db.Model):
     __tablename__ = "janmotsav_years"
@@ -154,6 +155,7 @@ class JanmotsavYear(db.Model):
     year = Column(Integer, nullable=False, unique=True)
     is_current = Column(Boolean, default=False)
 
+    # Event details
     event_name = Column(String(255))
     location_name = Column(String(255))
     location_url = Column(String(500))
@@ -172,32 +174,35 @@ class JanmotsavYear(db.Model):
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # ----------------------------
-    # UPI FIELDS
-    # ----------------------------
+    # UPI fields
     upi_id = Column(String(150))
     upi_name = Column(String(150))
     upi_note = Column(String(255))
     upi_min_amount = Column(Numeric(10, 2))
     upi_status = Column(Boolean, default=True)
 
-    # ----------------------------
-    # NEW FIELDS ADDED IN DB
-    # ----------------------------
-    enable_payment_flag = Column(Boolean, default=False)   # Admin toggle for payment
-    is_event_closed = Column(Boolean, default=False)       # If event is finished
+    # New flags
+    enable_payment_flag = Column(Boolean, default=False)
+    is_event_closed = Column(Boolean, default=False)
 
-    # ----------------------------
-    # RELATIONSHIPS
-    # ----------------------------
+    # Relationships
     days = relationship("JanmotsavDay", back_populates="year_info")
 
-    attendance = relationship("JanmotsavAttendance", back_populates="year_info")
+    attendance = relationship(
+        "JanmotsavAttendance",
+        back_populates="year_info",
+        cascade="all, delete-orphan"
+    )
 
-    payments = relationship("YearPaymentTracking", back_populates="year")
+    payments = relationship(
+        "YearPaymentTracking",
+        back_populates="year",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<JanmotsavYear {self.year}>"
+
 
 # ---------------------------------------------------
 # JANMOTSAV DAY
@@ -209,7 +214,6 @@ class JanmotsavDay(db.Model):
     year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
 
     is_deleted = Column(Boolean, default=False)
-
     event_date = Column(Date, nullable=False)
 
     breakfast = Column(Boolean, default=False)
@@ -220,31 +224,37 @@ class JanmotsavDay(db.Model):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     year_info = relationship("JanmotsavYear", back_populates="days")
-    attendance = relationship("JanmotsavAttendance", back_populates="day_info")
+
+    attendance = relationship(
+        "JanmotsavAttendance",
+        back_populates="day_info",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<JanmotsavDay {self.event_date}>"
 
+
 # ---------------------------------------------------
-# Seva Nidhi Payment
+# SEVA NIDHI PAYMENT
 # ---------------------------------------------------
 class SevaNidhiPayment(db.Model):
     __tablename__ = "seva_nidhi_payments"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True, nullable=False)
+    user_id = db.Column(db.Integer, ForeignKey("users.id"), unique=True, nullable=False)
 
-    seva_nidhi_amount = db.Column(db.Integer, nullable=True)
-    seva_nidhi_account_details = db.Column(db.String, nullable=True)
+    seva_nidhi_amount = db.Column(db.Integer)
+    seva_nidhi_account_details = db.Column(db.String)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(DateTime, default=datetime.utcnow)
+    updated_at = db.Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship to User table
-    user = db.relationship("User", back_populates="seva_nidhi_payment")
+    user = relationship("User", back_populates="seva_nidhi_payment")
 
     def __repr__(self):
         return f"<SevaNidhiPayment user_id={self.user_id} amount={self.seva_nidhi_amount}>"
+
 
 # ---------------------------------------------------
 # JANMOTSAV ATTENDANCE
@@ -266,14 +276,25 @@ class JanmotsavAttendance(db.Model):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Relationships
     user = relationship("User")
-    day_info = relationship("JanmotsavDay", back_populates="attendance")
+
+    day_info = relationship(
+        "JanmotsavDay",
+        back_populates="attendance"
+    )
+
+    year_info = relationship(
+        "JanmotsavYear",
+        back_populates="attendance"
+    )
 
     def __repr__(self):
         return f"<JanmotsavAttendance user_id={self.user_id} day_id={self.day_id}>"
 
+
 # ---------------------------------------------------
-# PAYMENT TRACKING
+# YEAR PAYMENT TRACKING
 # ---------------------------------------------------
 class YearPaymentTracking(db.Model):
     __tablename__ = "year_payment_tracking"
@@ -284,7 +305,7 @@ class YearPaymentTracking(db.Model):
     user_id = Column(Integer, nullable=False)
 
     amount = Column(Numeric(10, 2))
-    status = Column(String(20))           # SUCCESS / FAILURE / CANCELLED
+    status = Column(String(20))
     txn_id = Column(String(120))
     utr = Column(String(120))
     response_code = Column(String(10))
