@@ -27,14 +27,26 @@ def get_current_config():
         "year_id": year.id,
         "event_name": year.event_name,
         "is_current": year.is_current,
+
+        # LOCATION + SOCIAL
         "location_name": year.location_name,
         "location_url": year.location_url,
         "facebook_url": year.facebook_url,
         "youtube_url": year.youtube_url,
         "instagram_url": year.instagram_url,
+
+        # CUSTOM LINKS
         "custom_link_1": year.custom_link_1,
         "custom_link_2": year.custom_link_2,
+
+        # DESCRIPTION
         "description": year.description,
+
+        # ⭐ NEW FIELDS ADDED HERE
+        "enable_payment_flag": year.enable_payment_flag,
+        "is_event_closed": year.is_event_closed,
+
+        # DAYS
         "days": [
             {
                 "day_id": d.id,
@@ -47,6 +59,7 @@ def get_current_config():
             for d in days
         ]
     })
+
 
 
 # ==========================================================
@@ -174,8 +187,8 @@ def add_days():
     year_id = data["year_id"]
 
     try:
-        # DELETE EXISTING DAYS FOR THIS YEAR
-        JanmotsavDay.query.filter_by(year_id=year_id).delete()
+        # SOFT DELETE OLD DAYS
+        JanmotsavDay.query.filter_by(year_id=year_id).update({"is_deleted": True})
 
         # INSERT NEW DAYS
         for d in data["days"]:
@@ -186,6 +199,7 @@ def add_days():
                 lunch=d.get("lunch", False),
                 evesnacks=d.get("evesnacks", False),
                 dinner=d.get("dinner", False),
+                is_deleted=False
             )
             db.session.add(new_day)
 

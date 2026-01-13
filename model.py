@@ -147,28 +147,43 @@ class JanmotsavYear(db.Model):
     id = Column(Integer, primary_key=True)
     year = Column(Integer, nullable=False, unique=True)
     is_current = Column(Boolean, default=False)
+
     event_name = Column(String(255))
     location_name = Column(String(255))
     location_url = Column(String(500))
+
     facebook_url = Column(String(500))
     youtube_url = Column(String(500))
     instagram_url = Column(String(500))
+
     custom_link_1 = Column(String(500))
     custom_link_2 = Column(String(500))
+
     description = Column(Text)
+
     is_deleted = Column(Boolean, default=False)
     is_locked = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # New UPI fields
+    # ----------------------------
+    # UPI FIELDS
+    # ----------------------------
     upi_id = Column(String(150))
     upi_name = Column(String(150))
     upi_note = Column(String(255))
     upi_min_amount = Column(Numeric(10, 2))
     upi_status = Column(Boolean, default=True)
 
-    # Relationships
+    # ----------------------------
+    # NEW FIELDS ADDED IN DB
+    # ----------------------------
+    enable_payment_flag = Column(Boolean, default=False)   # Admin toggle for payment
+    is_event_closed = Column(Boolean, default=False)       # If event is finished
+
+    # ----------------------------
+    # RELATIONSHIPS
+    # ----------------------------
     days = relationship("JanmotsavDay", back_populates="year_info")
 
     attendance = relationship("JanmotsavAttendance", back_populates="year_info")
@@ -177,7 +192,6 @@ class JanmotsavYear(db.Model):
 
     def __repr__(self):
         return f"<JanmotsavYear {self.year}>"
-
 
 # ---------------------------------------------------
 # JANMOTSAV DAY
