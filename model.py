@@ -32,6 +32,8 @@ class User(db.Model):
     gender = db.Column(db.String(10), default='male')
     unique_family_code = db.Column(db.Integer, unique=True)
     zone_code = db.Column(db.String(50), nullable=False)
+    # ⭐ NEW FIELD replacing old isapprove
+    is_canary_user = db.Column(db.Boolean, default=False)
 
     bookings = db.relationship('Booking', back_populates='user')
     sunday_bookings = db.relationship('SundayBooking', back_populates='user')
@@ -127,43 +129,44 @@ class BookingLock(db.Model):
 # ---------------------------------------------------
 # JANMOTSAV MODELS
 # ---------------------------------------------------
-# ===========================================================
-# JANMOTSAV YEAR TABLE
-# ===========================================================
+# ---------------------------------------------------
+#  JANMOTSAV YEAR MODEL (UPDATED WITH UPI FIELDS)
+# ---------------------------------------------------
 class JanmotsavYear(db.Model):
     __tablename__ = "janmotsav_years"
 
     id = Column(Integer, primary_key=True)
-    year = Column(Integer, unique=True, nullable=False)
-
-    # Soft delete
-    is_deleted = Column(Boolean, default=False)
-
-    # Current year flag
+    year = Column(Integer, nullable=False, unique=True)
     is_current = Column(Boolean, default=False)
-
-    # Lock editing of days & attendance
-    is_locked = Column(Boolean, default=False)
-
-    # Event details
     event_name = Column(String(255))
     location_name = Column(String(255))
-    location_url = Column(String(255))
-    facebook_url = Column(String(255))
-    youtube_url = Column(String(255))
-    instagram_url = Column(String(255))
-    custom_link_1 = Column(String(255))
-    custom_link_2 = Column(String(255))
-    description = Column(String(2000))
+    location_url = Column(String(500))
+    facebook_url = Column(String(500))
+    youtube_url = Column(String(500))
+    instagram_url = Column(String(500))
+    custom_link_1 = Column(String(500))
+    custom_link_2 = Column(String(500))
+    description = Column(Text)
+    is_deleted = Column(Boolean, default=False)
+    is_locked = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # New UPI fields
+    upi_id = Column(String(150))                     # e.g. ramdasi@oksbi
+    upi_name = Column(String(150))                   # UPI receiver name
+    upi_note = Column(String(255))                   # note visible in UPI app
+    upi_min_amount = Column(Numeric(10, 2))          # optional
+    upi_status = Column(Boolean, default=True)       # enable/disable UPI
+
+    # One-to-many relationship → Year → Days
     days = relationship("JanmotsavDay", back_populates="year_info")
-    attendance = relationship("JanmotsavAttendance", back_populates="year_info")
+
+    # One-to-many → Year → Payment Tracking
+    payments = relationship("YearPaymentTracking", back_populates="year")
 
     def __repr__(self):
         return f"<JanmotsavYear {self.year}>"
-
 
 # ===========================================================
 # JANMOTSAV DAY TABLE
@@ -223,3 +226,29 @@ class JanmotsavAttendance(db.Model):
 
     def __repr__(self):
         return f"<Attendance user={self.user_id}, day={self.day_id}>"
+
+# ---------------------------------------------------
+#  NEW: PAYMENT TRACKING TABLE
+# ---------------------------------------------------
+class YearPaymentTracking(db.Model):
+    __tablename__ = "year_payment_tracking"
+
+    id = Column(Integer, primary_key=True)
+
+    year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
+    user_id = Column(Integer, nullable=False)
+
+    amount = Column(Numeric(10, 2))
+    status = Column(String(20))           # SUCCESS / FAILURE / CANCELLED
+    txn_id = Column(String(120))          # txnId from UPI response
+    utr = Column(String(120))             # UTR (optional)
+    response_code = Column(String(10))    # 00 = success
+    raw_response = Column(Text)           # Entire callback string
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship back to Year
+    year = relationship("JanmotsavYear", back_populates="payments")
+
+    def __repr__(self):
+        return f"<PaymentTracking {self.status} - {self.amount}>"
