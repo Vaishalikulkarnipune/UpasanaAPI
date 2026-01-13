@@ -1,6 +1,12 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from model import db, JanmotsavYear, JanmotsavDay, JanmotsavAttendance
+from model import (
+    db,
+    JanmotsavYear,
+    JanmotsavDay,
+    JanmotsavAttendance,
+    SevaNidhiPayment
+)
 
 router = Blueprint("janmotsav", __name__)
 
@@ -9,7 +15,6 @@ router = Blueprint("janmotsav", __name__)
 # ==========================================================
 @router.get("/janmotsav/config/current")
 def get_current_config():
-    """Return the currently active Janmotsav configuration."""
     year = JanmotsavYear.query.filter_by(is_current=True, is_deleted=False).first()
 
     if not year:
@@ -28,25 +33,24 @@ def get_current_config():
         "event_name": year.event_name,
         "is_current": year.is_current,
 
-        # LOCATION + SOCIAL
+        # LOCATION + SOCIAL LINKS
         "location_name": year.location_name,
         "location_url": year.location_url,
         "facebook_url": year.facebook_url,
         "youtube_url": year.youtube_url,
         "instagram_url": year.instagram_url,
 
-        # CUSTOM LINKS
+        # CUSTOM
         "custom_link_1": year.custom_link_1,
         "custom_link_2": year.custom_link_2,
 
-        # DESCRIPTION
         "description": year.description,
 
-        # ⭐ NEW FIELDS ADDED HERE
+        # NEW EVENT FLAGS
         "enable_payment_flag": year.enable_payment_flag,
         "is_event_closed": year.is_event_closed,
 
-        # DAYS
+        # DAYS LIST
         "days": [
             {
                 "day_id": d.id,
@@ -60,13 +64,11 @@ def get_current_config():
         ]
     })
 
-
 # ==========================================================
-# SAVE ATTENDANCE (NEW VERSION)
+# SAVE ATTENDANCE + SEVA NIDHI
 # ==========================================================
 @router.post("/janmotsav/attendance/save")
 def save_attendance():
-    """Create/update attendance per day + store seva_nidhi per user."""
     data = request.json
 
     user_id = data["user_id"]
@@ -77,29 +79,21 @@ def save_attendance():
     seva_nidhi_account_details = data.get("seva_nidhi_account_details")
 
     try:
-        # ======================================================
-        # 1️⃣ SAVE SEVA-NIDHI (USER-LEVEL DATA)
-        # ======================================================
-        if seva_nidhi:  # Only save if seva-nidhi is enabled
-            existing_payment = SevaNidhiPayment.query.filter_by(user_id=user_id).first()
+        # ------------------------------------------------------
+        # 1️⃣ SAVE SEVA NIDHI PAYMENT (ALWAYS CREATE NEW ENTRY)
+        # ------------------------------------------------------
+        if seva_nidhi:
+            new_payment = SevaNidhiPayment(
+                user_id=user_id,
+                year_id=year_id,
+                amount=seva_nidhi_amount,
+                account_details=seva_nidhi_account_details,
+            )
+            db.session.add(new_payment)
 
-            if existing_payment:
-                # Update
-                existing_payment.seva_nidhi_amount = seva_nidhi_amount
-                existing_payment.seva_nidhi_account_details = seva_nidhi_account_details
-                existing_payment.updated_at = datetime.utcnow()
-            else:
-                # Create new
-                new_payment = SevaNidhiPayment(
-                    user_id=user_id,
-                    seva_nidhi_amount=seva_nidhi_amount,
-                    seva_nidhi_account_details=seva_nidhi_account_details,
-                )
-                db.session.add(new_payment)
-
-        # ======================================================
-        # 2️⃣ SAVE ATTENDANCE FOR EACH DAY
-        # ======================================================
+        # ------------------------------------------------------
+        # 2️⃣ SAVE ATTENDANCE (PER DAY)
+        # ------------------------------------------------------
         for entry in data["attendance"]:
             day_id = entry["day_id"]
 
@@ -108,7 +102,6 @@ def save_attendance():
             ).first()
 
             if existing:
-                # Update existing attendance
                 existing.breakfast_count = entry.get("breakfast", 0)
                 existing.lunch_count = entry.get("lunch", 0)
                 existing.evesnacks_count = entry.get("evesnacks", 0)
@@ -116,7 +109,6 @@ def save_attendance():
                 existing.updated_at = datetime.utcnow()
 
             else:
-                # Insert new day attendance
                 rec = JanmotsavAttendance(
                     user_id=user_id,
                     year_id=year_id,
@@ -137,25 +129,23 @@ def save_attendance():
         return jsonify({"error": "Failed to save attendance"}), 500
 
 # ==========================================================
-# CREATE YEAR (ADMIN)
+# ADMIN: CREATE / UPDATE YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/year/create")
 def create_or_update_year():
-    """Create or Update a Janmotsav year."""
     data = request.json
-    year_id = data.get("id")  # if id present → update
+    year_id = data.get("id")
 
     try:
-        # If new year is marked current, unset previous ones
         if data.get("is_current"):
             JanmotsavYear.query.update({"is_current": False})
 
         if year_id:
-            # ---- UPDATE MODE ----
             year = JanmotsavYear.query.get(year_id)
             if not year:
                 return jsonify({"error": "Year not found"}), 404
 
+            # Update fields
             year.year = data.get("year", year.year)
             year.is_current = data.get("is_current", year.is_current)
             year.event_name = data.get("event_name", year.event_name)
@@ -172,7 +162,6 @@ def create_or_update_year():
             return jsonify({"status": "success", "message": "Year updated", "year_id": year.id})
 
         else:
-            # ---- CREATE MODE ----
             new_year = JanmotsavYear(
                 year=data["year"],
                 is_current=data.get("is_current", False),
@@ -197,21 +186,17 @@ def create_or_update_year():
         print("Error creating/updating year:", e)
         return jsonify({"error": "Failed to save year"}), 500
 
-
 # ==========================================================
-# ADD DAYS TO YEAR (ADMIN)
+# ADMIN: ADD DAYS TO YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/days/add")
 def add_days():
-    """Replace old days with the new list for the given year."""
     data = request.json
     year_id = data["year_id"]
 
     try:
-        # SOFT DELETE OLD DAYS
         JanmotsavDay.query.filter_by(year_id=year_id).update({"is_deleted": True})
 
-        # INSERT NEW DAYS
         for d in data["days"]:
             new_day = JanmotsavDay(
                 year_id=year_id,
@@ -233,11 +218,10 @@ def add_days():
         return jsonify({"error": "Failed to add days"}), 500
 
 # ==========================================================
-# ATTENDANCE SUMMARY PER USER
+# USER ATTENDANCE SUMMARY
 # ==========================================================
 @router.get("/janmotsav/attendance/summary/<int:user_id>")
 def attendance_summary_user(user_id):
-    """Return attendance summary for a user for the current Janmotsav year."""
     year = JanmotsavYear.query.filter_by(is_current=True, is_deleted=False).first()
 
     if not year:
@@ -253,6 +237,17 @@ def attendance_summary_user(user_id):
         "days": []
     }
 
+    # NEW: Fetch seva-nidhi payments
+    payments = SevaNidhiPayment.query.filter_by(
+        user_id=user_id,
+        year_id=year.id
+    ).all()
+
+    total_paid = sum(p.amount for p in payments)
+
+    response["seva_nidhi_paid"] = len(payments) > 0
+    response["seva_nidhi_total_amount"] = total_paid
+
     for day in days:
         att = JanmotsavAttendance.query.filter_by(
             user_id=user_id, day_id=day.id, is_deleted=False
@@ -264,17 +259,15 @@ def attendance_summary_user(user_id):
             "lunch": att.lunch_count if att else 0,
             "evesnacks": att.evesnacks_count if att else 0,
             "dinner": att.dinner_count if att else 0,
-            "seva_nidhi": att.seva_nidhi if att else False,
-            "seva_nidhi_amount": att.seva_nidhi_amount if att else 0,
-
         })
 
     return jsonify(response)
 
+# ==========================================================
+# ALL USERS SUMMARY (ADMIN)
+# ==========================================================
 @router.get("/janmotsav/attendance/summary")
 def attendance_summary_all():
-    """Return attendance summary for all users for the current Janmotsav year."""
-    
     year = JanmotsavYear.query.filter_by(
         is_current=True, is_deleted=False
     ).first()
@@ -298,8 +291,6 @@ def attendance_summary_all():
             db.func.sum(JanmotsavAttendance.lunch_count),
             db.func.sum(JanmotsavAttendance.evesnacks_count),
             db.func.sum(JanmotsavAttendance.dinner_count),
-            db.func.bool_or(JanmotsavAttendance.seva_nidhi),
-            db.func.sum(JanmotsavAttendance.seva_nidhi_amount)  # SUM amount
         ).filter_by(day_id=day.id, is_deleted=False).first()
 
         response["days"].append({
@@ -309,19 +300,19 @@ def attendance_summary_all():
             "lunch_total": totals[1] or 0,
             "evesnacks_total": totals[2] or 0,
             "dinner_total": totals[3] or 0,
-            "seva_nidhi_any": totals[4] or False,
-            "seva_nidhi_total": totals[5] or 0     # ⭐ NEW FIELD ADDED
         })
+
+    # Add seva-nidhi totals (NEW)
+    all_payments = SevaNidhiPayment.query.filter_by(year_id=year.id).all()
+    response["seva_nidhi_total"] = sum(p.amount for p in all_payments)
 
     return jsonify(response)
 
-
 # ==========================================================
-# LIST ALL YEARS (ADMIN)
+# LIST YEARS (ADMIN)
 # ==========================================================
 @router.get("/janmotsav/admin/year/list")
 def list_years():
-    """Return all active (non-deleted) Janmotsav years."""
     years = (
         JanmotsavYear.query
             .filter_by(is_deleted=False)
@@ -341,13 +332,11 @@ def list_years():
         ]
     })
 
-
 # ==========================================================
-# GET YEAR DETAILS FOR EDITING (ADMIN)
+# GET YEAR DETAILS (ADMIN)
 # ==========================================================
 @router.get("/janmotsav/admin/year/<int:year_id>")
 def get_year_details(year_id):
-    """Return full details of selected Janmotsav year for Admin edit."""
     year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
 
     if not year:
@@ -386,13 +375,11 @@ def get_year_details(year_id):
         ]
     })
 
-
 # ==========================================================
-# SOFT DELETE YEAR
+# DELETE YEAR (SOFT DELETE)
 # ==========================================================
 @router.delete("/janmotsav/admin/year/delete/<int:year_id>")
 def delete_year(year_id):
-    """Soft delete a year."""
     year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
 
     if not year:
