@@ -236,8 +236,8 @@ class SevaNidhiPayment(db.Model):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     year_id = Column(Integer, ForeignKey("janmotsav_years.id"), nullable=False)
 
-    amount = Column(Integer, nullable=False)
-    account_details = Column(String, nullable=True)
+    amount = Column(Integer,name="seva_nidhi_amount",nullable=False)
+    account_details = Column(String,name="seva_nidhi_account_details", nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
