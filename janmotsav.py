@@ -80,16 +80,29 @@ def save_attendance():
 
     try:
         # ------------------------------------------------------
-        # 1️⃣ SAVE SEVA NIDHI PAYMENT (ALWAYS CREATE NEW ENTRY)
+        # 1️⃣ SAVE / UPDATE SEVA NIDHI PAYMENT
         # ------------------------------------------------------
         if seva_nidhi:
-            new_payment = SevaNidhiPayment(
+            # Check if a record already exists for the same user + year
+            existing_payment = SevaNidhiPayment.query.filter_by(
                 user_id=user_id,
-                year_id=year_id,
-                amount=seva_nidhi_amount,
-                account_details=seva_nidhi_account_details,
-            )
-            db.session.add(new_payment)
+                year_id=year_id
+            ).first()
+
+            if existing_payment:
+                # Update existing entry
+                existing_payment.amount = seva_nidhi_amount
+                existing_payment.account_details = seva_nidhi_account_details
+                existing_payment.updated_at = datetime.utcnow()
+            else:
+                # Create new entry
+                new_payment = SevaNidhiPayment(
+                    user_id=user_id,
+                    year_id=year_id,
+                    amount=seva_nidhi_amount,
+                    account_details=seva_nidhi_account_details,
+                )
+                db.session.add(new_payment)
 
         # ------------------------------------------------------
         # 2️⃣ SAVE ATTENDANCE (PER DAY)
@@ -98,7 +111,10 @@ def save_attendance():
             day_id = entry["day_id"]
 
             existing = JanmotsavAttendance.query.filter_by(
-                user_id=user_id, year_id=year_id, day_id=day_id, is_deleted=False
+                user_id=user_id,
+                year_id=year_id,
+                day_id=day_id,
+                is_deleted=False
             ).first()
 
             if existing:
@@ -107,7 +123,6 @@ def save_attendance():
                 existing.evesnacks_count = entry.get("evesnacks", 0)
                 existing.dinner_count = entry.get("dinner", 0)
                 existing.updated_at = datetime.utcnow()
-
             else:
                 rec = JanmotsavAttendance(
                     user_id=user_id,
