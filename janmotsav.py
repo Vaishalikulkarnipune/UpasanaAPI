@@ -252,17 +252,26 @@ def attendance_summary_user(user_id):
         "days": []
     }
 
-    # NEW: Fetch seva-nidhi payments
+    # ============================================================
+    # FETCH SEVA NIDHI PAYMENTS (NEW + FIXED)
+    # ============================================================
     payments = SevaNidhiPayment.query.filter_by(
         user_id=user_id,
         year_id=year.id
-    ).all()
+    ).order_by(SevaNidhiPayment.created_at.asc()).all()
 
     total_paid = sum(p.amount for p in payments)
+    last_payment = payments[-1] if payments else None
 
     response["seva_nidhi_paid"] = len(payments) > 0
     response["seva_nidhi_total_amount"] = total_paid
+    response["seva_nidhi_account_details"] = (
+        last_payment.account_details if last_payment else None
+    )
 
+    # ============================================================
+    # ATTENDANCE FOR EACH DAY
+    # ============================================================
     for day in days:
         att = JanmotsavAttendance.query.filter_by(
             user_id=user_id, day_id=day.id, is_deleted=False
