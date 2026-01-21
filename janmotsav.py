@@ -152,11 +152,30 @@ def save_attendance():
         print("Error saving attendance:", e)
         return jsonify({"error": "Failed to save attendance"}), 500
 
+# ==========================================================
+# ADMIN: CREATE / UPDATE YEAR (MAINTENANCE)
+# ==========================================================
+@router.post("/janmotsav/admin/year/create")
+def create_or_update_year():
+    return jsonify({
+        "status": "error",
+        "message": "This API is under maintenance. Please try again later."
+    }), 503
 
+
+# ==========================================================
+# ADMIN: ADD DAYS TO YEAR (MAINTENANCE)
+# ==========================================================
+@router.post("/janmotsav/admin/days/add")
+def add_days():
+    return jsonify({
+        "status": "error",
+        "message": "This API is under maintenance. Please try again later."
+    }), 503
 # ==========================================================
 # ADMIN: CREATE / UPDATE YEAR
 # ==========================================================
-@router.post("/janmotsav/admin/year/create")
+@router.post("/janmotsav/admin/year/createOLD")
 def create_or_update_year():
     data = request.json
     year_id = data.get("id")
@@ -214,7 +233,7 @@ def create_or_update_year():
 # ==========================================================
 # ADMIN: ADD DAYS TO YEAR
 # ==========================================================
-@router.post("/janmotsav/admin/days/add")
+@router.post("/janmotsav/admin/days/addOLD")
 def add_days():
     data = request.json
     year_id = data["year_id"]
