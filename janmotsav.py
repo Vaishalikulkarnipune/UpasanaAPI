@@ -176,7 +176,7 @@ def add_days():
 # ADMIN: CREATE / UPDATE YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/year/createOLD")
-def create_or_update_year():
+def create_or_update_year_old():
     data = request.json
     year_id = data.get("id")
 
@@ -234,7 +234,7 @@ def create_or_update_year():
 # ADMIN: ADD DAYS TO YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/days/addOLD")
-def add_days():
+def add_days_old():
     data = request.json
     year_id = data["year_id"]
 
