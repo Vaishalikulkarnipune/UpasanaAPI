@@ -288,7 +288,7 @@ def attendance_summary_user(user_id):
     return jsonify(response)
 
 # ==========================================================
-# ALL USERS SUMMARY (ADMIN) - FIXED
+# ALL USERS SUMMARY (ADMIN)
 # ==========================================================
 @router.get("/janmotsav/attendance/summary")
 def attendance_summary_all():
@@ -299,47 +299,36 @@ def attendance_summary_all():
     if not year:
         return jsonify({"error": "No current Janmotsav year found"}), 404
 
-    rows = (
-        db.session.query(
-            JanmotsavDay.event_date,
-            db.func.sum(JanmotsavAttendance.breakfast_count),
-            db.func.sum(JanmotsavAttendance.lunch_count),
-            db.func.sum(JanmotsavAttendance.evesnacks_count),
-            db.func.sum(JanmotsavAttendance.dinner_count),
-        )
-        .join(JanmotsavDay, JanmotsavDay.id == JanmotsavAttendance.day_id)
-        .filter(
-            JanmotsavAttendance.year_id == year.id,
-            JanmotsavAttendance.is_deleted == False,
-            JanmotsavDay.is_deleted == False,
-        )
-        .group_by(JanmotsavDay.event_date)
-        .order_by(JanmotsavDay.event_date)
-        .all()
-    )
+    days = JanmotsavDay.query.filter_by(
+        year_id=year.id, is_deleted=False
+    ).order_by(JanmotsavDay.event_date).all()
 
     response = {
         "year": year.year,
         "event_name": year.event_name,
-        "days": [],
+        "days": []
     }
 
-    for row in rows:
+    for day in days:
+        totals = db.session.query(
+            db.func.sum(JanmotsavAttendance.breakfast_count),
+            db.func.sum(JanmotsavAttendance.lunch_count),
+            db.func.sum(JanmotsavAttendance.evesnacks_count),
+            db.func.sum(JanmotsavAttendance.dinner_count),
+        ).filter_by(day_id=day.id, is_deleted=False).first()
+
         response["days"].append({
-            "date": row[0].strftime("%Y-%m-%d"),
-            "dateFormatted": row[0].strftime("%d %b"),
-            "breakfast_total": row[1] or 0,
-            "lunch_total": row[2] or 0,
-            "evesnacks_total": row[3] or 0,
-            "dinner_total": row[4] or 0,
+            "date": day.event_date.strftime("%Y-%m-%d"),
+            "dateFormatted": day.event_date.strftime("%d %b"),
+            "breakfast_total": totals[0] or 0,
+            "lunch_total": totals[1] or 0,
+            "evesnacks_total": totals[2] or 0,
+            "dinner_total": totals[3] or 0,
         })
 
-    # Seva Nidhi total
-    response["seva_nidhi_total"] = (
-        db.session.query(db.func.coalesce(db.func.sum(SevaNidhiPayment.amount), 0))
-        .filter(SevaNidhiPayment.year_id == year.id)
-        .scalar()
-    )
+    # Add seva-nidhi totals (NEW)
+    all_payments = SevaNidhiPayment.query.filter_by(year_id=year.id).all()
+    response["seva_nidhi_total"] = sum(p.amount for p in all_payments)
 
     return jsonify(response)
 
