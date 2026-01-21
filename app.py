@@ -43,6 +43,35 @@ def get_reference_value(key):
     record = ReferenceData.query.filter_by(reference_key=key).first()
     return record.reference_value if record else None
 
+# Function to fetch app version metadata for Force Update
+@app.route('/app-metadata', methods=['GET'])
+def get_app_metadata():
+    """
+    Returns the minimum required version and latest version of the app.
+    This is used by the mobile app to check for forced updates.
+    """
+    try:
+        # Fetch values from your ReferenceData table
+        min_required = get_reference_value('min_required_version')
+        latest_version = get_reference_value('latest_version')
+        update_msg = get_reference_value('update_message')
+
+        # Fallback defaults if not found in database
+        return jsonify({
+            "minRequired": min_required if min_required else "2.0.2026.0",
+            "latestVersion": latest_version if latest_version else "2.0.2026.0",
+            "updateMessage": update_msg if update_msg else "A critical update is required to continue using the app."
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error in get_app_metadata: {str(e)}")
+        # If DB fails, return a safe default so the app doesn't crash
+        return jsonify({
+            "minRequired": "2.0.2026.0",
+            "latestVersion": "2.0.2026.0",
+            "updateMessage": "Please update your app to the latest version."
+        }), 200
+
 # Function to fetch the feature toggle
 def get_feature_toggle(toggle_name):
     """
