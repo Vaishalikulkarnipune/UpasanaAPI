@@ -80,40 +80,48 @@ def save_attendance():
 
     try:
         # ------------------------------------------------------
-        # 1️⃣ SAVE / UPDATE SEVA NIDHI PAYMENT
+        # 1️⃣ SEVA NIDHI (SAFE)
         # ------------------------------------------------------
         if seva_nidhi:
-            # Check if a record already exists for the same user + year
-            existing_payment = SevaNidhiPayment.query.filter_by(
+            payment = SevaNidhiPayment.query.filter_by(
                 user_id=user_id,
                 year_id=year_id
             ).first()
 
-            if existing_payment:
-                # Update existing entry
-                existing_payment.amount = seva_nidhi_amount
-                existing_payment.account_details = seva_nidhi_account_details
-                existing_payment.updated_at = datetime.utcnow()
+            if payment:
+                payment.amount = seva_nidhi_amount
+                payment.account_details = seva_nidhi_account_details
+                payment.updated_at = datetime.utcnow()
             else:
-                # Create new entry
-                new_payment = SevaNidhiPayment(
-                    user_id=user_id,
-                    year_id=year_id,
-                    amount=seva_nidhi_amount,
-                    account_details=seva_nidhi_account_details,
+                db.session.add(
+                    SevaNidhiPayment(
+                        user_id=user_id,
+                        year_id=year_id,
+                        amount=seva_nidhi_amount,
+                        account_details=seva_nidhi_account_details
+                    )
                 )
-                db.session.add(new_payment)
 
         # ------------------------------------------------------
-        # 2️⃣ SAVE ATTENDANCE (PER DAY)
+        # 2️⃣ ATTENDANCE (FIXED – DAY RESOLUTION)
         # ------------------------------------------------------
         for entry in data["attendance"]:
-            day_id = entry["day_id"]
+            event_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
+
+            # 🔒 Resolve correct day (ONLY ONE ALLOWED)
+            day = JanmotsavDay.query.filter_by(
+                year_id=year_id,
+                event_date=event_date,
+                is_deleted=False
+            ).first()
+
+            if not day:
+                continue  # or raise error if strict
 
             existing = JanmotsavAttendance.query.filter_by(
                 user_id=user_id,
                 year_id=year_id,
-                day_id=day_id,
+                day_id=day.id,
                 is_deleted=False
             ).first()
 
@@ -124,16 +132,17 @@ def save_attendance():
                 existing.dinner_count = entry.get("dinner", 0)
                 existing.updated_at = datetime.utcnow()
             else:
-                rec = JanmotsavAttendance(
-                    user_id=user_id,
-                    year_id=year_id,
-                    day_id=day_id,
-                    breakfast_count=entry.get("breakfast", 0),
-                    lunch_count=entry.get("lunch", 0),
-                    evesnacks_count=entry.get("evesnacks", 0),
-                    dinner_count=entry.get("dinner", 0),
+                db.session.add(
+                    JanmotsavAttendance(
+                        user_id=user_id,
+                        year_id=year_id,
+                        day_id=day.id,
+                        breakfast_count=entry.get("breakfast", 0),
+                        lunch_count=entry.get("lunch", 0),
+                        evesnacks_count=entry.get("evesnacks", 0),
+                        dinner_count=entry.get("dinner", 0),
+                    )
                 )
-                db.session.add(rec)
 
         db.session.commit()
         return jsonify({"status": "success"})
@@ -142,6 +151,7 @@ def save_attendance():
         db.session.rollback()
         print("Error saving attendance:", e)
         return jsonify({"error": "Failed to save attendance"}), 500
+
 
 # ==========================================================
 # ADMIN: CREATE / UPDATE YEAR
