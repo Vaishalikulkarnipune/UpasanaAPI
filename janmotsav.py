@@ -63,10 +63,12 @@ def get_current_config():
             for d in days
         ]
     })
-
 # ==========================================================
 # SAVE ATTENDANCE + SEVA NIDHI
 # ==========================================================
+# ⚠️ LEGACY API
+# Used by old mobile app (expects day_id)
+# DO NOT MODIFY
 @router.post("/janmotsav/attendance/save")
 def save_attendance():
     data = request.json
@@ -151,6 +153,133 @@ def save_attendance():
         db.session.rollback()
         print("Error saving attendance:", e)
         return jsonify({"error": "Failed to save attendance"}), 500
+    
+# ==========================================================
+# SAVE ATTENDANCE + SEVA NIDHI
+# ==========================================================
+@router.post("/janmotsav/attendance/v1/save")
+def save_attendance_v1():
+    print("========== SAVE ATTENDANCE API CALLED ==========")
+
+    data = request.json
+    print("📥 Incoming JSON:", data)
+
+    try:
+        user_id = data["user_id"]
+        year_id = data["year_id"]
+        print(f"👤 user_id={user_id}, 📅 year_id={year_id}")
+
+        seva_nidhi = data.get("seva_nidhi", False)
+        seva_nidhi_amount = data.get("seva_nidhi_amount")
+        seva_nidhi_account_details = data.get("seva_nidhi_account_details")
+
+        print(
+            f"💰 seva_nidhi={seva_nidhi}, "
+            f"amount={seva_nidhi_amount}, "
+            f"account={seva_nidhi_account_details}"
+        )
+
+        # ------------------------------------------------------
+        # 1️⃣ SEVA NIDHI
+        # ------------------------------------------------------
+        if seva_nidhi:
+            print("➡️ Processing Seva Nidhi")
+
+            payment = SevaNidhiPayment.query.filter_by(
+                user_id=user_id,
+                year_id=year_id
+            ).first()
+
+            if payment:
+                print("🔁 Existing Seva Nidhi record found, updating")
+                payment.amount = seva_nidhi_amount
+                payment.account_details = seva_nidhi_account_details
+                payment.updated_at = datetime.utcnow()
+            else:
+                print("➕ Creating new Seva Nidhi record")
+                db.session.add(
+                    SevaNidhiPayment(
+                        user_id=user_id,
+                        year_id=year_id,
+                        amount=seva_nidhi_amount,
+                        account_details=seva_nidhi_account_details
+                    )
+                )
+        else:
+            print("ℹ️ Seva Nidhi not provided, skipping")
+
+        # ------------------------------------------------------
+        # 2️⃣ ATTENDANCE
+        # ------------------------------------------------------
+        attendance_list = data.get("attendance", [])
+        print(f"📋 Attendance entries received: {len(attendance_list)}")
+
+        for idx, entry in enumerate(attendance_list):
+            print(f"➡️ Processing attendance index {idx}: {entry}")
+
+            if "date" not in entry:
+                print("❌ Missing 'date' in entry, skipping")
+                continue
+
+            try:
+                event_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
+                print(f"📆 Parsed event_date={event_date}")
+            except Exception as e:
+                print("❌ Date parsing failed:", e)
+                continue
+
+            day = JanmotsavDay.query.filter_by(
+                year_id=year_id,
+                event_date=event_date,
+                is_deleted=False
+            ).first()
+
+            if not day:
+                print(f"⚠️ No JanmotsavDay found for date {event_date}, skipping")
+                continue
+
+            print(f"✅ Resolved day_id={day.id}")
+
+            existing = JanmotsavAttendance.query.filter_by(
+                user_id=user_id,
+                year_id=year_id,
+                day_id=day.id,
+                is_deleted=False
+            ).first()
+
+            if existing:
+                print("🔁 Existing attendance found, updating")
+                existing.breakfast_count = entry.get("breakfast", 0)
+                existing.lunch_count = entry.get("lunch", 0)
+                existing.evesnacks_count = entry.get("evesnacks", 0)
+                existing.dinner_count = entry.get("dinner", 0)
+                existing.updated_at = datetime.utcnow()
+            else:
+                print("➕ Creating new attendance record")
+                db.session.add(
+                    JanmotsavAttendance(
+                        user_id=user_id,
+                        year_id=year_id,
+                        day_id=day.id,
+                        breakfast_count=entry.get("breakfast", 0),
+                        lunch_count=entry.get("lunch", 0),
+                        evesnacks_count=entry.get("evesnacks", 0),
+                        dinner_count=entry.get("dinner", 0),
+                    )
+                )
+
+        print("💾 Committing DB transaction")
+        db.session.commit()
+
+        print("✅ SAVE ATTENDANCE SUCCESS")
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print("🔥 ERROR in save_attendance:", str(e))
+        db.session.rollback()
+        print("↩️ DB ROLLBACK DONE")
+        return jsonify({"error": "Failed to save attendance"}), 500
+
 
 # ==========================================================
 # ADMIN: CREATE / UPDATE YEAR (MAINTENANCE)
