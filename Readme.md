@@ -1,4 +1,5 @@
-**Windows Command**
+<!-- ================= For Internal Team ================= -->
+<!-- **Windows Command**
 flask run --host=0.0.0.0 --port=5000
 **Linux Server command**
 gunicorn app:app -w 4 -b 0.0.0.0:5000
@@ -54,4 +55,159 @@ For example, if the IP of your machine is 192.168.1.100 and Flask is running on 
 
 bash
 Copy code
-http://192.168.1.100:5000
+http://192.168.1.100:5000 --!>
+
+
+<!-- ================= For Internal Team Discussion End ================= -->
+
+# 🛕 Ramdasi Bana  
+### Devotional Booking & Member Management System
+
+A production-ready backend system built using **Flask and PostgreSQL** to manage devotional member registrations, structured booking workflows, and administrative analytics.
+
+This project demonstrates strong backend engineering fundamentals including relational database modeling, validation logic design, booking state management, and production deployment readiness.
+
+---
+
+## 🚀 Project Overview
+
+Upasana API is a structured backend system designed to handle:
+
+- Member registration & authentication
+- Zone-based validation using pincode logic
+- Booking lifecycle management
+- Booking lock control to prevent conflicts
+- Administrative summary insights
+- Aggregated relational data retrieval
+- Load validation & duplicate prevention mechanisms
+
+The system is designed with clean architecture principles and production scalability in mind.
+
+---
+
+## 🎯 Business Logic & Engineering Highlights
+
+### 🔐 Secure User Flow
+- Mobile-based registration & login
+- Duplicate prevention at database level
+- Input validation & integrity checks
+
+### 📍 Zone-Based Validation Engine
+- Pincode → Zone mapping enforcement
+- Booking eligibility validation
+- Structured error handling
+
+### 📅 Intelligent Booking Management
+- Active / Inactive booking states
+- Automatic booking lock removal on cancellation
+- Conflict prevention logic
+- Ownership verification before updates
+
+### 📊 Administrative Analytics
+- Summary aggregation APIs
+- User-to-booking relational joins
+- Structured JSON responses optimized for dashboard integration
+
+### 🧪 Reliability & Testing
+- Load testing scripts
+- Duplicate booking validation tests
+- Health check endpoint for deployment monitoring
+
+---
+
+## 🛠 Tech Stack
+
+- **Backend:** Flask (Python)
+- **Database:** PostgreSQL
+- **ORM:** SQLAlchemy
+- **Server:** Gunicorn
+- **Testing:** Custom validation scripts
+- **Deployment Ready:** Linux server compatible
+
+---
+
+## 🏗 Architecture & Design Approach
+
+- Stateless RESTful design
+- Relational database normalization
+- Centralized configuration management
+- Structured error handling with HTTP status codes
+- Production-grade server configuration
+- Designed for future JWT-based authentication integration
+- Easily extendable to microservices architecture
+
+---
+
+## 📈 Scalability Considerations
+
+- Ready for Docker containerization
+- Can integrate Redis for booking lock optimization
+- Supports horizontal scaling via Gunicorn workers
+- Easily extendable for admin dashboard frontend integration
+- Modular design for adding new devotional events
+
+---
+
+## 📸 Screenshots
+
+<!-- SCREENSHOT: User Registration API Response -->
+
+<!-- SCREENSHOT: Booking Creation Flow -->
+
+<!-- SCREENSHOT: Sunday Booking Aggregated Data -->
+
+<!-- SCREENSHOT: Admin Summary Dashboard Response -->
+
+<!-- SCREENSHOT: Database Schema Diagram -->
+
+---
+
+## 🏆 Key Learning Outcomes
+
+Through this project, I demonstrated:
+
+- Real-world backend workflow design
+- Relational data modeling expertise
+- Conflict prevention logic implementation
+- Scalable API architecture design
+- Production deployment understanding
+- Performance validation & system reliability testing
+
+---
+
+## ⚙️ Installation & Setup
+
+###  Clone the Repository
+
+```bash
+git clone https://github.com/your-username/upasana-api.git
+cd upasana-api
+```
+
+### Create Virtual Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # For Linux / Mac
+# venv\Scripts\activate   # For Windows
+```
+
+### Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### Configure Environment Variables
+```bash
+DATABASE_URL=your_postgresql_connection_string
+SECRET_KEY=your_secret_key
+```
+
+### Run the Application
+```bash
+python app.py
+```
+
+#### Application runs locally on 
+```bash
+http://localhost:5000
+```
