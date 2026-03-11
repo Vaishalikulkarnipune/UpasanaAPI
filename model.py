@@ -45,8 +45,13 @@ class User(db.Model):
     unique_family_code = db.Column(db.Integer, unique=True)
     zone_code = db.Column(db.String(50), nullable=False)
 
+    # Geocoded coordinates for map (filled on first geocode of full_address)
+    latitude = db.Column(db.Numeric(10, 7), nullable=True)
+    longitude = db.Column(db.Numeric(10, 7), nullable=True)
+
     # Canary testing flag
     is_canary_user = db.Column(db.Boolean, default=False)
+    isadmin = db.Column(db.Boolean, default=False)
 
     # Relationships
     bookings = relationship("Booking", back_populates="user")
@@ -300,3 +305,20 @@ class YearPaymentTracking(db.Model):
 
     def __repr__(self):
         return f"<PaymentTracking {self.status} - {self.amount}>"
+
+
+# ============================================================
+# ADHIK MAAS SUBMISSIONS
+# ============================================================
+class AdhikMaasSubmission(db.Model):
+    __tablename__ = "adhik_maas_submissions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    seva_preference = Column(String(100), nullable=False)
+    seva_label = Column(String(255), default="")
+    area = Column(String(100), nullable=False)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AdhikMaasSubmission id={self.id} user_id={self.user_id} area={self.area}>"

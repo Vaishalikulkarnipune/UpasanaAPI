@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock
+from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission
 from Booking import create_booking
 from datetime import datetime
 from config import get_db_connection, release_db_connection,Config
@@ -10,6 +10,7 @@ from flask_cors import CORS
 import logging
 from janmotsav import router as janmotsav_bp
 from sunday_booking import create_sunday_booking
+from adhik_maas import router as adhik_maas_bp
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +21,8 @@ app.config.from_object(Config)
 
 # Register the janmostav blueprint
 app.register_blueprint(janmotsav_bp)
+# Register Adhik Maas Daura Seva (local JSON until DB)
+app.register_blueprint(adhik_maas_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 # Configure logging to ensure all logs are captured
