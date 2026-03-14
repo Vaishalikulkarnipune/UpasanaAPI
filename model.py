@@ -45,8 +45,13 @@ class User(db.Model):
     unique_family_code = db.Column(db.Integer, unique=True)
     zone_code = db.Column(db.String(50), nullable=False)
 
+    # Geocoded coordinates for map (filled on first geocode of full_address)
+    latitude = db.Column(db.Numeric(10, 7), nullable=True)
+    longitude = db.Column(db.Numeric(10, 7), nullable=True)
+
     # Canary testing flag
     is_canary_user = db.Column(db.Boolean, default=False)
+    isadmin = db.Column(db.Boolean, default=False)
 
     # Relationships
     bookings = relationship("Booking", back_populates="user")
@@ -300,3 +305,55 @@ class YearPaymentTracking(db.Model):
 
     def __repr__(self):
         return f"<PaymentTracking {self.status} - {self.amount}>"
+
+
+# ============================================================
+# ADHIK MAAS AREAS LOOKUP
+# ============================================================
+class AdhikMaasArea(db.Model):
+    __tablename__ = "adhik_maas_areas"
+
+    id           = Column(Integer, primary_key=True)
+    route_number = Column(String(5),   nullable=False)
+    route_name   = Column(String(200), nullable=False)
+    area_name    = Column(String(150), nullable=False, unique=True)
+    pin_code     = Column(String(10),  nullable=False)
+    is_active    = Column(Boolean, default=True, nullable=False)
+    sort_order   = Column(Integer, default=0, nullable=False)
+
+    def __repr__(self):
+        return f"<AdhikMaasArea route={self.route_number} area={self.area_name}>"
+
+
+# ADHIK MAAS SUBMISSIONS
+# ============================================================
+class AdhikMaasSubmission(db.Model):
+    __tablename__ = "adhik_maas_submissions"
+
+    id            = Column(Integer, primary_key=True)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Raw pipe-separated string kept for backward-compat (e.g. "padyapuja|seva|afternoon|shejarti")
+    seva_preference     = Column(String(100), nullable=False)
+    seva_label          = Column(String(255), default="")
+    area                = Column(String(100), nullable=False)
+    route_number        = Column(String(5))
+    route_name          = Column(String(200))
+    pin_code            = Column(String(10))
+    submitted_at        = Column(DateTime, default=datetime.utcnow)
+
+    # Structured boolean flags — derived from seva_preference on every write
+    has_padyapuja       = Column(Boolean, default=False, nullable=False)
+    has_seva_mahaprasad = Column(Boolean, default=False, nullable=False)
+    seva_time           = Column(String(20))          # 'afternoon' | 'evening' | 'any' | None
+    has_shejarti        = Column(Boolean, default=False, nullable=False)
+
+    # Admin shortlist / finalise workflow
+    is_shortlisted      = Column(Boolean, default=False, nullable=False)
+    shortlisted_at      = Column(DateTime)
+    is_finalized        = Column(Boolean, default=False, nullable=False)
+    finalized_at        = Column(DateTime)
+    admin_notes         = Column(String(500))
+
+    def __repr__(self):
+        return f"<AdhikMaasSubmission id={self.id} user_id={self.user_id} area={self.area}>"

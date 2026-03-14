@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock
+from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission,AdhikMaasArea
 from Booking import create_booking
 from datetime import datetime
 from config import get_db_connection, release_db_connection,Config
@@ -10,6 +10,7 @@ from flask_cors import CORS
 import logging
 from janmotsav import router as janmotsav_bp
 from sunday_booking import create_sunday_booking
+from adhik_maas import router as adhik_maas_bp
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -20,12 +21,15 @@ app.config.from_object(Config)
 
 # Register the janmostav blueprint
 app.register_blueprint(janmotsav_bp)
+# Register Adhik Maas Daura Seva (local JSON until DB)
+app.register_blueprint(adhik_maas_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 # Configure logging to ensure all logs are captured
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-CORS(app)
+# Allow browser (Chrome) and other clients: any origin for local/dev
+CORS(app, origins="*", allow_headers=["Content-Type", "Authorization"])
 
 def validate_email(email):
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
@@ -80,6 +84,54 @@ def get_feature_toggle(toggle_name):
     # Query the feature_toggle table for the given toggle_name
     feature_toggle = FeatureToggle.query.filter_by(toggle_name=toggle_name).first()  # Fixed filter_by syntax
     return feature_toggle
+
+
+@app.route('/registration-settings', methods=['GET'])
+def get_registration_settings():
+    toggle = get_feature_toggle('registration_code_enabled')
+    enabled = toggle.toggle_enabled if toggle else True
+    return jsonify({'registration_code_enabled': enabled}), 200
+
+
+@app.route('/registration-settings', methods=['POST'])
+def update_registration_settings():
+    data = request.get_json()
+    if data is None or 'registration_code_enabled' not in data:
+        return jsonify({'error': 'registration_code_enabled field is required'}), 400
+
+    new_value = bool(data['registration_code_enabled'])
+    toggle = get_feature_toggle('registration_code_enabled')
+    if toggle:
+        toggle.toggle_enabled = new_value
+    else:
+        toggle = FeatureToggle(toggle_name='registration_code_enabled', toggle_enabled=new_value)
+        db.session.add(toggle)
+    db.session.commit()
+    return jsonify({'registration_code_enabled': new_value}), 200
+
+
+@app.route('/adhik-maas-settings', methods=['GET'])
+def get_adhik_maas_settings():
+    toggle = get_feature_toggle('allow_adhik_maas_edit')
+    enabled = toggle.toggle_enabled if toggle else False
+    return jsonify({'allow_adhik_maas_edit': enabled}), 200
+
+
+@app.route('/adhik-maas-settings', methods=['POST'])
+def update_adhik_maas_settings():
+    data = request.get_json()
+    if data is None or 'allow_adhik_maas_edit' not in data:
+        return jsonify({'error': 'allow_adhik_maas_edit field is required'}), 400
+
+    new_value = bool(data['allow_adhik_maas_edit'])
+    toggle = get_feature_toggle('allow_adhik_maas_edit')
+    if toggle:
+        toggle.toggle_enabled = new_value
+    else:
+        toggle = FeatureToggle(toggle_name='allow_adhik_maas_edit', toggle_enabled=new_value)
+        db.session.add(toggle)
+    db.session.commit()
+    return jsonify({'allow_adhik_maas_edit': new_value}), 200
 
 # Function to fetch the feature toggle
 @app.route('/refdata', methods=['GET'])
@@ -531,7 +583,8 @@ def get_booking_users_by_year():
                 users.gender, users.unique_family_code,
                 bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
                 bookings.created_at, bookings.is_active,
-                bookings.updated_date, bookings.updated_by, users.isadmin
+                bookings.updated_date, bookings.updated_by, users.isadmin,
+                users.zone_code
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
             WHERE EXTRACT(YEAR FROM bookings.booking_date) = %s
@@ -571,6 +624,7 @@ def get_booking_users_by_year():
                     'gender': row[15],
                     'unique_family_code': row[16],
                     'isadmin': row[24],
+                    'zone_code': row[25] or '',
                     'bookings': []
                 }
 
@@ -1024,16 +1078,23 @@ def login():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Query the user by mobile_number
-        cursor.execute("SELECT id, password FROM users WHERE mobile_number = %s", (mobile_number,))
+        # Query the user by mobile_number — also fetch zone_code for local notifications
+        cursor.execute(
+            "SELECT id, password, zone_code FROM users WHERE mobile_number = %s",
+            (mobile_number,)
+        )
         user = cursor.fetchone()
 
         if user:
-            user_id, stored_password = user
+            user_id, stored_password, zone_code = user
 
             # Verify the password
             if stored_password == password:
-                return jsonify({"message": "Login successful", "user_id": user_id}), 200
+                return jsonify({
+                    "message": "Login successful",
+                    "user_id": user_id,
+                    "zone_code": zone_code or "",
+                }), 200
             else:
                 return jsonify({"error": "Invalid password"}), 401
         else:
