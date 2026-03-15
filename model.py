@@ -26,7 +26,7 @@ class User(db.Model):
     first_name = db.Column(db.String(50), nullable=False)
     middle_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(100), unique=True, nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=True)
     password = db.Column(db.String(255), nullable=False)
     mobile_number = db.Column(db.String(15), unique=True, nullable=False)
     alternate_mobile_number = db.Column(db.String(15))

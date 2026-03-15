@@ -1116,22 +1116,19 @@ def login():
 #get total users and bookings                   
 @app.route('/upasanaUsersSummary', methods=['GET'])
 def upasanaUsersSummary():
-    # Get total number of registered users
-    total_users = User.query.count()
+    try:
+        total_users            = User.query.count()
+        total_bookings         = Booking.query.filter_by(is_active=True).count()
+        total_anugrahit_users  = User.query.filter_by(anugrahit="yes").count()
 
-    # Get total number of bookings
-    total_bookings = Booking.query.filter_by(is_active=True).count()
-
-  # Get total number of distinct users who have made bookings
-    total_anugrahit_users = User.query.filter_by(anugrahit="yes").count()
-
-
-    # Return the results as a JSON response
-    return jsonify({
-        "total_users": total_users,
-        "total_bookings": total_bookings,
-        "total_anugrahit_users": total_anugrahit_users
-    }), 200
+        return jsonify({
+            "total_users":           total_users,
+            "total_bookings":        total_bookings,
+            "total_anugrahit_users": total_anugrahit_users
+        }), 200
+    except Exception as e:
+        print(f"[upasanaUsersSummary] ERROR: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Get Booking dates for booking date must be gray
 @app.route('/bookingsDates', methods=['GET'])
