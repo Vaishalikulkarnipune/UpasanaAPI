@@ -133,6 +133,43 @@ def update_adhik_maas_settings():
     db.session.commit()
     return jsonify({'allow_adhik_maas_edit': new_value}), 200
 
+
+_HOME_FLAGS = {
+    'show_upasana_booking':  False,
+    'show_janmotsav':        False,
+    'show_adhik_maas_daura': True,
+}
+
+@app.route('/home-settings', methods=['GET'])
+def get_home_settings():
+    result = {}
+    for key, default in _HOME_FLAGS.items():
+        t = get_feature_toggle(key)
+        result[key] = t.toggle_enabled if t else default
+    return jsonify(result), 200
+
+
+@app.route('/home-settings', methods=['POST'])
+def update_home_settings():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+    updated = {}
+    for key in _HOME_FLAGS:
+        if key in data:
+            value = bool(data[key])
+            toggle = get_feature_toggle(key)
+            if toggle:
+                toggle.toggle_enabled = value
+            else:
+                db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=value))
+            updated[key] = value
+    if not updated:
+        return jsonify({'error': 'No valid keys provided'}), 400
+    db.session.commit()
+    return jsonify(updated), 200
+
+
 # Function to fetch the feature toggle
 @app.route('/refdata', methods=['GET'])
 def get_reference_data():
