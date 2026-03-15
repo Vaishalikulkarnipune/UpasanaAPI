@@ -118,22 +118,22 @@ def _submission_dict(s, u=None):
         "full_address":         getattr(u, "full_address", None)  if u else None,
         # raw
         "seva_preference":      s.seva_preference,
-        "seva_label":           s.seva_label,
+        "seva_label":           getattr(s, "seva_label", None),
         "area":                 s.area,
-        "route_number":         s.route_number,
-        "route_name":           s.route_name,
-        "pin_code":             s.pin_code,
+        "route_number":         getattr(s, "route_number", None),
+        "route_name":           getattr(s, "route_name", None),
+        "pin_code":             getattr(s, "pin_code", None),
         # structured flags
-        "has_padyapuja":        bool(s.has_padyapuja),
-        "has_seva_mahaprasad":  bool(s.has_seva_mahaprasad),
-        "seva_time":            s.seva_time,
-        "has_shejarti":         bool(s.has_shejarti),
+        "has_padyapuja":        bool(getattr(s, "has_padyapuja", False)),
+        "has_seva_mahaprasad":  bool(getattr(s, "has_seva_mahaprasad", False)),
+        "seva_time":            getattr(s, "seva_time", None),
+        "has_shejarti":         bool(getattr(s, "has_shejarti", False)),
         # workflow
-        "is_shortlisted":       bool(s.is_shortlisted),
-        "shortlisted_at":       s.shortlisted_at.isoformat()  if s.shortlisted_at  else None,
-        "is_finalized":         bool(s.is_finalized),
-        "finalized_at":         s.finalized_at.isoformat()    if s.finalized_at    else None,
-        "admin_notes":          s.admin_notes,
+        "is_shortlisted":       bool(getattr(s, "is_shortlisted", False)),
+        "shortlisted_at":       getattr(s, "shortlisted_at").isoformat() if getattr(s, "shortlisted_at", None) else None,
+        "is_finalized":         bool(getattr(s, "is_finalized", False)),
+        "finalized_at":         getattr(s, "finalized_at").isoformat()   if getattr(s, "finalized_at", None)   else None,
+        "admin_notes":          getattr(s, "admin_notes", None),
         "submitted_at":         s.submitted_at.isoformat()    if s.submitted_at    else None,
     }
 
@@ -206,16 +206,19 @@ def get_my_submission():
         return jsonify({"submitted": False}), 200
 
     return jsonify({
-        "submitted":        True,
-        "id":               s.id,
-        "seva_preference":  s.seva_preference,
-        "seva_label":       s.seva_label,
-        "area":             s.area,
-        "has_padyapuja":    bool(s.has_padyapuja),
-        "has_seva_mahaprasad": bool(s.has_seva_mahaprasad),
-        "seva_time":        s.seva_time,
-        "has_shejarti":     bool(s.has_shejarti),
-        "submitted_at":     s.submitted_at.isoformat() if s.submitted_at else None,
+        "submitted":           True,
+        "id":                  s.id,
+        "seva_preference":     s.seva_preference,
+        "seva_label":          s.seva_label,
+        "area":                s.area,
+        "route_number":        getattr(s, "route_number", None),
+        "route_name":          getattr(s, "route_name", None),
+        "pin_code":            getattr(s, "pin_code", None),
+        "has_padyapuja":       bool(getattr(s, "has_padyapuja", False)),
+        "has_seva_mahaprasad": bool(getattr(s, "has_seva_mahaprasad", False)),
+        "seva_time":           getattr(s, "seva_time", None),
+        "has_shejarti":        bool(getattr(s, "has_shejarti", False)),
+        "submitted_at":        s.submitted_at.isoformat() if s.submitted_at else None,
     }), 200
 
 
@@ -597,6 +600,87 @@ def list_finalized():
     subs = AdhikMaasSubmission.query.filter_by(is_finalized=True).order_by(AdhikMaasSubmission.area).all()
     out  = [_submission_dict(s, User.query.get(s.user_id)) for s in subs]
     return jsonify({"finalized": out, "total": len(out)}), 200
+
+
+# ─── Seva options config ──────────────────────────────────────────────────────
+
+_SEVA_TOGGLE_MAP = {
+    "padyapuja":       "adhik_maas_seva_padyapuja",
+    "seva_mahaprasad": "adhik_maas_seva_mahaprasad",
+    "shejarti":        "adhik_maas_seva_shejarti",
+}
+
+
+def _seva_toggle_enabled(name: str) -> bool:
+    """Return the enabled status for a seva feature toggle; defaults to True."""
+    from model import FeatureToggle
+    t = FeatureToggle.query.filter_by(toggle_name=name).first()
+    return t.toggle_enabled if t else True
+
+
+@router.route("/adhik-maas/seva-options", methods=["GET"])
+def get_seva_options():
+    """
+    [Public] Return which seva options the admin has enabled.
+
+    Response:
+    {
+      "padyapuja":       true,
+      "seva_mahaprasad": true,
+      "shejarti":        false
+    }
+    """
+    return jsonify({
+        key: _seva_toggle_enabled(toggle_name)
+        for key, toggle_name in _SEVA_TOGGLE_MAP.items()
+    }), 200
+
+
+@router.route("/adhik-maas/seva-options", methods=["POST"])
+def update_seva_options():
+    """
+    [Admin] Enable or disable individual seva options.
+
+    Body (any subset):
+    {
+      "padyapuja":       true | false,
+      "seva_mahaprasad": true | false,
+      "shejarti":        true | false
+    }
+
+    No admin auth check here — mirrors the pattern of /registration-settings
+    and /adhik-maas-settings; access is restricted at the app/UI level.
+    """
+    from model import db, FeatureToggle
+
+    data    = request.get_json(force=True, silent=True) or {}
+    updated = {}
+
+    for key, toggle_name in _SEVA_TOGGLE_MAP.items():
+        if key in data:
+            new_val = bool(data[key])
+            toggle  = FeatureToggle.query.filter_by(toggle_name=toggle_name).first()
+            if toggle:
+                toggle.toggle_enabled = new_val
+            else:
+                toggle = FeatureToggle(toggle_name=toggle_name, toggle_enabled=new_val)
+                db.session.add(toggle)
+            updated[key] = new_val
+
+    if not updated:
+        return jsonify({"error": "No valid seva option keys provided"}), 400
+
+    try:
+        db.session.commit()
+        # return the full current state
+        return jsonify({
+            key: _seva_toggle_enabled(toggle_name)
+            for key, toggle_name in _SEVA_TOGGLE_MAP.items()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.exception("seva-options update error: %s", e)
+        return jsonify({"error": "Failed to update seva options"}), 500
 
 
 # ─── Admin: map data ──────────────────────────────────────────────────────────
