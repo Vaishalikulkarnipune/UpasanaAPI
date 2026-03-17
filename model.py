@@ -56,6 +56,10 @@ class User(db.Model):
     # Set to True by admin password-reset; user must choose new password on next login
     force_password_change = db.Column(db.Boolean, default=False, nullable=False)
 
+    # Set to True by admin quick-register; user must complete profile before using the app
+    # NULL for pre-existing users (treated as False)
+    is_quick_registered = db.Column(db.Boolean, default=None, nullable=True)
+
     # Relationships
     bookings = relationship("Booking", back_populates="user")
     sunday_bookings = relationship("SundayBooking", back_populates="user")

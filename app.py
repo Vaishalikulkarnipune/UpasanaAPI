@@ -313,6 +313,213 @@ def change_password():
             release_db_connection(conn)
 
 
+@app.route('/admin/quick-register', methods=['POST'])
+def admin_quick_register():
+    """
+    Admin: create a minimal user record (quick registration).
+
+    Body (JSON):
+      admin_mobile | admin_user_id  – auth
+      first_name, last_name         – required
+      mobile_number                 – required, 10 digits
+      pincode                       – required, 6 digits (used to look up zone_code)
+
+    Hardcoded: password = "123456", full_address = "Pune", city = "Pune",
+               state = "Maharashtra", is_quick_registered = TRUE
+    """
+    import os
+    SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
+    data = request.get_json(silent=True) or {}
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    admin_mobile  = str(data.get("admin_mobile") or "").strip()
+    admin_user_id = data.get("admin_user_id")
+
+    if admin_mobile == SUPER_ADMIN_MOBILE:
+        pass
+    elif admin_user_id:
+        try:
+            admin = User.query.get(int(admin_user_id))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid admin_user_id"}), 401
+        if not admin or not getattr(admin, "isadmin", False):
+            return jsonify({"error": "Admin access required"}), 403
+    else:
+        return jsonify({"error": "admin_mobile or admin_user_id required"}), 401
+
+    # ── Validate inputs ────────────────────────────────────────────────────────
+    first_name    = str(data.get("first_name")    or "").strip()
+    last_name     = str(data.get("last_name")     or "").strip()
+    mobile_number = str(data.get("mobile_number") or "").strip()
+    pincode       = str(data.get("pincode")       or "").strip()
+
+    if not first_name:
+        return jsonify({"error": "first_name is required"}), 400
+    if not last_name:
+        return jsonify({"error": "last_name is required"}), 400
+    if not re.match(r'^\d{10}$', mobile_number):
+        return jsonify({"error": "mobile_number must be exactly 10 digits"}), 400
+    if not re.match(r'^\d{6}$', pincode):
+        return jsonify({"error": "pincode must be exactly 6 digits"}), 400
+
+    # ── Check duplicate mobile ─────────────────────────────────────────────────
+    if User.query.filter_by(mobile_number=mobile_number).first():
+        return jsonify({"error": "Mobile number is already registered"}), 400
+
+    # ── Look up zone from pincode (raw connection, same as /register) ──────────
+    conn   = None
+    cursor = None
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT zone_code FROM Zone WHERE pincode = %s", (pincode,))
+        zone_result = cursor.fetchone()
+        if not zone_result:
+            return jsonify({"error": "Invalid PIN code — not found in our records"}), 400
+        zone_code = zone_result[0]
+
+        cursor.execute(
+            """
+            INSERT INTO users (
+                first_name, last_name, email,
+                password, confirm_password,
+                mobile_number, full_address, area, landmark,
+                city, state, pincode,
+                anugrahit, gender, zone_code,
+                force_password_change, is_quick_registered
+            ) VALUES (
+                %s, %s, NULL,
+                %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                FALSE, TRUE
+            ) RETURNING id
+            """,
+            (
+                first_name, last_name,
+                "123456", "123456",
+                mobile_number, "Pune", "", "",
+                "Pune", "Maharashtra", pincode,
+                "no", "male", zone_code,
+            ),
+        )
+        new_user_id = cursor.fetchone()[0]
+        conn.commit()
+
+        return jsonify({
+            "status":    "success",
+            "message":   f"Quick registration successful for {first_name} {last_name}.",
+            "user_id":   new_user_id,
+            "zone_code": zone_code,
+        }), 201
+
+    except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
+        logging.error("admin_quick_register DB error: %s", db_err)
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logging.error("admin_quick_register error: %s", e)
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            release_db_connection(conn)
+
+
+@app.route('/complete-profile/<int:user_id>', methods=['POST'])
+def complete_profile(user_id):
+    """
+    Used by quick-registered users to complete their profile after logging in.
+    Clears is_quick_registered = FALSE and force_password_change = FALSE on success.
+    Also updates zone_code if pincode is provided.
+    """
+    data = request.get_json(silent=True) or {}
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # ── Validate required fields ───────────────────────────────────────────────
+    required = {
+        "first_name":   "First name",
+        "last_name":    "Last name",
+        "password":     "Password",
+        "mobile_number":"Mobile number",
+        "full_address": "Full address",
+        "area":         "Area",
+        "landmark":     "Landmark",
+        "flat_no":      "Flat No / House name",
+        "pincode":      "PIN code",
+    }
+    missing = [label for key, label in required.items() if not str(data.get(key, "")).strip()]
+    if missing:
+        return jsonify({"error": f"Required fields missing: {', '.join(missing)}"}), 400
+
+    if not re.match(r'^\d{10}$', str(data.get("mobile_number", "")).strip()):
+        return jsonify({"error": "mobile_number must be exactly 10 digits"}), 400
+    if not re.match(r'^\d{6}$', str(data.get("pincode", "")).strip()):
+        return jsonify({"error": "pincode must be exactly 6 digits"}), 400
+
+    # ── Look up zone for pincode ───────────────────────────────────────────────
+    conn   = None
+    cursor = None
+    zone_code = None
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT zone_code FROM Zone WHERE pincode = %s", (data["pincode"].strip(),))
+        zone_result = cursor.fetchone()
+        if not zone_result:
+            return jsonify({"error": "Invalid PIN code — not found in our records"}), 400
+        zone_code = zone_result[0]
+    except Exception as e:
+        logging.error("complete_profile zone lookup error: %s", e)
+        return jsonify({"error": "Database error during zone lookup"}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            release_db_connection(conn)
+
+    # ── Check if mobile changed and is now taken by someone else ──────────────
+    new_mobile = str(data.get("mobile_number", "")).strip()
+    existing   = User.query.filter_by(mobile_number=new_mobile).first()
+    if existing and existing.id != user_id:
+        return jsonify({"error": "This mobile number is already registered by another user"}), 400
+
+    # ── Apply all profile fields ───────────────────────────────────────────────
+    updatable = [
+        "first_name", "middle_name", "last_name", "email",
+        "password", "confirm_password", "mobile_number", "alternate_mobile_number",
+        "flat_no", "full_address", "area", "landmark",
+        "city", "state", "pincode", "anugrahit", "gender",
+    ]
+    for field in updatable:
+        if field in data:
+            setattr(user, field, str(data[field]).strip() if data[field] is not None else None)
+
+    user.zone_code           = zone_code
+    user.is_quick_registered = False
+    user.force_password_change = False
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "status":    "success",
+            "message":   "Profile completed successfully.",
+            "zone_code": zone_code,
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error("complete_profile commit error: %s", e)
+        return jsonify({"error": "Database error"}), 500
+
+
 @app.route('/admin/reset-password', methods=['POST'])
 def admin_reset_password():
     """
@@ -363,9 +570,13 @@ def admin_reset_password():
         return jsonify({"error": "User not found"}), 404
 
     # ── Reset password (store plain-text to match existing auth) ──────────────
+    # Quick-registered users haven't completed their profile yet; they will
+    # set a real password during the CompleteProfile flow, so there is no
+    # need to force a password change on top of that.
+    is_quick = bool(user.is_quick_registered) if user.is_quick_registered is not None else False
     try:
         user.password              = new_password
-        user.force_password_change = True
+        user.force_password_change = False if is_quick else True
         db.session.commit()
         return jsonify({
             "status":    "success",
@@ -1028,7 +1239,8 @@ def update_user(user_id):
 
         # List of fields that can be updated
         update_fields = ['first_name', 'middle_name', 'last_name', 'email', 'password', 'mobile_number', 'alternate_mobile_number', 
-                         'flat_no', 'full_address', 'area', 'landmark', 'city', 'state', 'pincode', 'anugrahit', 'gender']
+                         'flat_no', 'full_address', 'area', 'landmark', 'city', 'state', 'pincode', 'anugrahit', 'gender',
+                         'is_quick_registered']
 
         # Only keep fields that are in update_fields and provided in the request
         updated_data = {key: data[key] for key in data if key in update_fields}
@@ -1197,15 +1409,15 @@ def login():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Query the user by mobile_number — also fetch zone_code and force_password_change
+        # Query the user by mobile_number — also fetch zone_code, force_password_change, is_quick_registered
         cursor.execute(
-            "SELECT id, password, zone_code, force_password_change FROM users WHERE mobile_number = %s",
+            "SELECT id, password, zone_code, force_password_change, is_quick_registered FROM users WHERE mobile_number = %s",
             (mobile_number,)
         )
         user = cursor.fetchone()
 
         if user:
-            user_id, stored_password, zone_code, force_pwd_change = user
+            user_id, stored_password, zone_code, force_pwd_change, is_quick_reg = user
 
             # Verify the password
             if stored_password == password:
@@ -1214,6 +1426,8 @@ def login():
                     "user_id": user_id,
                     "zone_code": zone_code or "",
                     "force_password_change": bool(force_pwd_change),
+                    # NULL for legacy users → treat as False
+                    "is_quick_registered": bool(is_quick_reg) if is_quick_reg is not None else False,
                 }), 200
             else:
                 return jsonify({"error": "Invalid password"}), 401
