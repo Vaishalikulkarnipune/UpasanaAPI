@@ -115,7 +115,12 @@ def _submission_dict(s, u=None):
         "user_mobile":          getattr(u, "mobile_number", None) if u else None,
         "user_zone_code":       getattr(u, "zone_code", None)     if u else None,
         "user_area":            getattr(u, "area", None)          if u else None,
+        "flat_no":              getattr(u, "flat_no", None)       if u else None,
         "full_address":         getattr(u, "full_address", None)  if u else None,
+        "landmark":             getattr(u, "landmark", None)      if u else None,
+        "city":                 getattr(u, "city", None)          if u else None,
+        "state":                getattr(u, "state", None)         if u else None,
+        "pincode":              getattr(u, "pincode", None)       if u else None,
         # raw
         "seva_preference":      s.seva_preference,
         "seva_label":           getattr(s, "seva_label", None),
@@ -128,6 +133,9 @@ def _submission_dict(s, u=None):
         "has_seva_mahaprasad":  bool(getattr(s, "has_seva_mahaprasad", False)),
         "seva_time":            getattr(s, "seva_time", None),
         "has_shejarti":         bool(getattr(s, "has_shejarti", False)),
+        # admin-assigned schedule & confirmed seva
+        "route_date":           getattr(s, "route_date").isoformat() if getattr(s, "route_date", None) else None,
+        "final_seva":           getattr(s, "final_seva", None),
         # workflow
         "is_shortlisted":       bool(getattr(s, "is_shortlisted", False)),
         "shortlisted_at":       getattr(s, "shortlisted_at").isoformat() if getattr(s, "shortlisted_at", None) else None,
@@ -360,6 +368,8 @@ def update_submission_admin(submission_id):
     seva_label      = data.get("seva_label", "")
     area            = (data.get("area") or "").strip()
     admin_notes     = data.get("admin_notes")
+    route_date_str  = data.get("route_date")      # "YYYY-MM-DD" or None
+    final_seva      = data.get("final_seva")       # confirmed seva label
 
     submission = AdhikMaasSubmission.query.get(submission_id)
     if not submission:
@@ -381,6 +391,14 @@ def update_submission_admin(submission_id):
         submission.pin_code     = area_info["pin_code"]
     if admin_notes is not None:
         submission.admin_notes = admin_notes
+    if route_date_str is not None:
+        from datetime import date as date_type
+        try:
+            submission.route_date = date_type.fromisoformat(route_date_str) if route_date_str else None
+        except ValueError:
+            return jsonify({"error": "route_date must be YYYY-MM-DD"}), 400
+    if final_seva is not None:
+        submission.final_seva = final_seva if final_seva else None
 
     try:
         db.session.commit()
@@ -602,6 +620,49 @@ def list_finalized():
     return jsonify({"finalized": out, "total": len(out)}), 200
 
 
+@router.route("/adhik-maas/public-finalized", methods=["GET"])
+def public_list_finalized():
+    """
+    [Public] Return finalized submissions visible to all users.
+    Only accessible when the feature-toggle 'adhik_maas_2026_list_finalized' is TRUE.
+    Returns a trimmed payload (no admin workflow fields).
+    """
+    from model import AdhikMaasSubmission, User, FeatureToggle
+
+    toggle = FeatureToggle.query.filter_by(toggle_name="adhik_maas_2026_list_finalized").first()
+    if not toggle or not toggle.toggle_enabled:
+        return jsonify({"error": "List not yet published"}), 403
+
+    subs = (
+        AdhikMaasSubmission.query
+        .filter_by(is_finalized=True)
+        .order_by(AdhikMaasSubmission.route_date, AdhikMaasSubmission.area)
+        .all()
+    )
+
+    def _public_dict(s):
+        u = User.query.get(s.user_id)
+        return {
+            "id":           s.id,
+            "user_name":    f"{u.first_name} {u.last_name}".strip() if u else "",
+            "flat_no":      getattr(u, "flat_no", None)       if u else None,
+            "full_address": getattr(u, "full_address", None)  if u else None,
+            "landmark":     getattr(u, "landmark", None)      if u else None,
+            "city":         getattr(u, "city", None)          if u else None,
+            "state":        getattr(u, "state", None)         if u else None,
+            "area":         s.area,
+            "route_number": getattr(s, "route_number", None),
+            "route_name":   getattr(s, "route_name", None),
+            "route_date":   getattr(s, "route_date").isoformat() if getattr(s, "route_date", None) else None,
+            "final_seva":   getattr(s, "final_seva", None),
+            "seva_label":   getattr(s, "seva_label", None),
+            "finalized_at": s.finalized_at.isoformat() if s.finalized_at else None,
+        }
+
+    out = [_public_dict(s) for s in subs]
+    return jsonify({"finalized": out, "total": len(out)}), 200
+
+
 # ─── Seva options config ──────────────────────────────────────────────────────
 
 _SEVA_TOGGLE_MAP = {
@@ -753,3 +814,210 @@ def get_map_data():
             "longitude":        round(lon, 6),
         })
     return jsonify(out), 200
+
+
+# ─── Export endpoint ──────────────────────────────────────────────────────────
+
+_TIME_LABELS = {
+    "afternoon": "Afternoon",
+    "evening":   "Evening",
+    "any":       "Any",
+}
+
+
+@router.route("/adhik-maas/export", methods=["GET"])
+def export_submissions():
+    """
+    [Admin] Download all submissions as CSV or XLSX.
+
+    Query params:
+      format   – 'csv' (default) or 'xlsx'
+      status   – 'all' (default) | 'shortlisted' | 'finalized'
+      search   – optional name / mobile / area substring filter
+      admin_user_id or admin_mobile – auth (same as all admin endpoints)
+    """
+    err, status_code = _require_admin()
+    if err is not None:
+        return err, status_code
+
+    import io
+    import pandas as pd
+    from flask import send_file, Response
+    from model import AdhikMaasSubmission, User
+
+    fmt           = request.args.get("format", "csv").lower()
+    status_filter = request.args.get("status", "all").lower()
+    search        = request.args.get("search", "").strip().lower()
+
+    query = AdhikMaasSubmission.query.join(User, AdhikMaasSubmission.user_id == User.id)
+    if status_filter == "shortlisted":
+        query = query.filter(AdhikMaasSubmission.is_shortlisted == True)
+    elif status_filter == "finalized":
+        query = query.filter(AdhikMaasSubmission.is_finalized == True)
+
+    submissions = query.order_by(
+        AdhikMaasSubmission.route_number,
+        AdhikMaasSubmission.area,
+    ).all()
+
+    rows = []
+    for s in submissions:
+        u = User.query.get(s.user_id)
+        if not u:
+            continue
+
+        name = " ".join(filter(None, [u.first_name, u.middle_name, u.last_name]))
+
+        if search and not any(
+            search in str(v).lower()
+            for v in [name, u.mobile_number, s.area, s.route_name, s.route_number]
+            if v
+        ):
+            continue
+
+        address = ", ".join(filter(None, [
+            u.flat_no, u.full_address, u.landmark,
+            u.area, u.city, u.state, u.pincode,
+        ]))
+
+        rows.append({
+            "Name":               name,
+            "Mobile":             u.mobile_number     or "",
+            "Zone":               u.zone_code         or "",
+            "Reg. Area":          u.area              or "",
+            "Address":            address,
+            "Route No.":          s.route_number      or "",
+            "Route Name":         s.route_name        or "",
+            "Submission Area":    s.area              or "",
+            "PIN Code":           s.pin_code          or "",
+            "Padyapuja":          "Yes" if s.has_padyapuja        else "No",
+            "Seva + Mahaprasad":  "Yes" if s.has_seva_mahaprasad  else "No",
+            "Time Preference":    _TIME_LABELS.get(s.seva_time, s.seva_time or "—"),
+            "Shejarti & Kaakad":  "Yes" if s.has_shejarti         else "No",
+            "Seva Label":         s.seva_label        or "",
+            "Route Date":         s.route_date.strftime("%d %b %Y") if s.route_date else "",
+            "Final Seva":         s.final_seva        or "",
+            "Shortlisted":        "Yes" if s.is_shortlisted  else "No",
+            "Finalized":          "Yes" if s.is_finalized    else "No",
+            "Finalized At":       s.finalized_at.strftime("%d %b %Y %H:%M") if s.finalized_at else "",
+            "Admin Notes":        s.admin_notes       or "",
+            "Submitted At":       s.submitted_at.strftime("%d %b %Y %H:%M") if s.submitted_at else "",
+        })
+
+    if not rows:
+        return jsonify({"error": "No data to export for the selected filter"}), 404
+
+    df = pd.DataFrame(rows)
+    date_str     = datetime.utcnow().strftime("%Y-%m-%d")
+    status_label = status_filter.capitalize()
+
+    if fmt == "xlsx":
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            sheet_name = status_label[:31]
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+            # Bold header row
+            from openpyxl.styles import Font, PatternFill, Alignment
+            header_fill = PatternFill("solid", fgColor="F15700")
+            for cell in ws[1]:
+                cell.font      = Font(bold=True, color="FFFFFF")
+                cell.fill      = header_fill
+                cell.alignment = Alignment(horizontal="center")
+            # Auto-fit column widths
+            for col in ws.columns:
+                width = max((len(str(cell.value or "")) for cell in col), default=8)
+                ws.column_dimensions[col[0].column_letter].width = min(width + 4, 55)
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"Adhik_Maas_{status_label}_{date_str}.xlsx",
+        )
+    else:
+        output = io.StringIO()
+        output.write("\ufeff")          # UTF-8 BOM so Excel opens it cleanly
+        df.to_csv(output, index=False)
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="adhik_maas_{status_filter}_{date_str}.csv"',
+            },
+        )
+
+
+# ─── Day Summary (public) ─────────────────────────────────────────────────────
+
+@router.route("/adhik-maas/day-summary", methods=["GET"])
+def adhik_maas_day_summary():
+    """
+    Public endpoint used by the HomeScreen Adhik Maas Daura card.
+
+    Query params:
+      date  – YYYY-MM-DD  (required)
+
+    Returns totals + per-seva counts for all *finalized* submissions
+    whose route_date matches the given date.
+    """
+    from model import AdhikMaasSubmission
+    from datetime import date as date_type
+
+    date_str = request.args.get("date", "").strip()
+    if not date_str:
+        return jsonify({"error": "date is required"}), 400
+
+    try:
+        date_obj = date_type.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "invalid date format, use YYYY-MM-DD"}), 400
+
+    subs = (
+        AdhikMaasSubmission.query
+        .filter(
+            AdhikMaasSubmission.route_date == date_obj,
+            AdhikMaasSubmission.is_finalized == True,
+        )
+        .all()
+    )
+
+    if not subs:
+        return jsonify({
+            "date":         date_str,
+            "route_number": None,
+            "route_name":   None,
+            "total":        0,
+            "sevas": {
+                "padyapuja":          0,
+                "abhishek_afternoon": 0,
+                "abhishek_evening":   0,
+                "shejarti":           0,
+                "mahaprasad":         0,
+            },
+        }), 200
+
+    # All finalized submissions for a route_date share the same route
+    route_number = subs[0].route_number
+    route_name   = subs[0].route_name
+
+    padyapuja          = sum(1 for s in subs if s.has_padyapuja)
+    abhishek_afternoon = sum(1 for s in subs if s.seva_time in ("afternoon",))
+    abhishek_evening   = sum(1 for s in subs if s.seva_time in ("evening", "any"))
+    shejarti           = sum(1 for s in subs if s.has_shejarti)
+    mahaprasad         = sum(1 for s in subs if s.has_seva_mahaprasad)
+
+    return jsonify({
+        "date":         date_str,
+        "route_number": route_number,
+        "route_name":   route_name,
+        "total":        len(subs),
+        "sevas": {
+            "padyapuja":          padyapuja,
+            "abhishek_afternoon": abhishek_afternoon,
+            "abhishek_evening":   abhishek_evening,
+            "shejarti":           shejarti,
+            "mahaprasad":         mahaprasad,
+        },
+    }), 200

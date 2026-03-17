@@ -112,26 +112,42 @@ def update_registration_settings():
 
 @app.route('/adhik-maas-settings', methods=['GET'])
 def get_adhik_maas_settings():
-    toggle = get_feature_toggle('allow_adhik_maas_edit')
-    enabled = toggle.toggle_enabled if toggle else False
-    return jsonify({'allow_adhik_maas_edit': enabled}), 200
+    edit_toggle      = get_feature_toggle('allow_adhik_maas_edit')
+    finalized_toggle = get_feature_toggle('adhik_maas_2026_list_finalized')
+    daura_toggle     = get_feature_toggle('show_adhik_maas_daura')
+    return jsonify({
+        'allow_adhik_maas_edit':          edit_toggle.toggle_enabled      if edit_toggle      else False,
+        'adhik_maas_2026_list_finalized': finalized_toggle.toggle_enabled if finalized_toggle else False,
+        'show_adhik_maas_daura':          daura_toggle.toggle_enabled     if daura_toggle     else True,
+    }), 200
 
 
 @app.route('/adhik-maas-settings', methods=['POST'])
 def update_adhik_maas_settings():
     data = request.get_json()
-    if data is None or 'allow_adhik_maas_edit' not in data:
-        return jsonify({'error': 'allow_adhik_maas_edit field is required'}), 400
+    if data is None:
+        return jsonify({'error': 'Request body is required'}), 400
 
-    new_value = bool(data['allow_adhik_maas_edit'])
-    toggle = get_feature_toggle('allow_adhik_maas_edit')
-    if toggle:
-        toggle.toggle_enabled = new_value
-    else:
-        toggle = FeatureToggle(toggle_name='allow_adhik_maas_edit', toggle_enabled=new_value)
-        db.session.add(toggle)
+    _ADHIK_MAAS_TOGGLES = {
+        'allow_adhik_maas_edit',
+        'adhik_maas_2026_list_finalized',
+    }
+    updated = {}
+    for key in _ADHIK_MAAS_TOGGLES:
+        if key in data:
+            new_value = bool(data[key])
+            toggle = get_feature_toggle(key)
+            if toggle:
+                toggle.toggle_enabled = new_value
+            else:
+                db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=new_value))
+            updated[key] = new_value
+
+    if not updated:
+        return jsonify({'error': f'Provide at least one of: {sorted(_ADHIK_MAAS_TOGGLES)}'}), 400
+
     db.session.commit()
-    return jsonify({'allow_adhik_maas_edit': new_value}), 200
+    return jsonify(updated), 200
 
 
 _HOME_FLAGS = {
@@ -271,10 +287,10 @@ def change_password():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Update password
+        # Update password and clear the force-change flag
         cursor.execute("""
             UPDATE users
-            SET password = %s, confirm_password = %s
+            SET password = %s, confirm_password = %s, force_password_change = FALSE
             WHERE id = %s
         """, (new_password, new_password, user_id))
         conn.commit()
@@ -295,6 +311,72 @@ def change_password():
             cursor.close()
         if conn:
             release_db_connection(conn)
+
+
+@app.route('/admin/reset-password', methods=['POST'])
+def admin_reset_password():
+    """
+    Admin: reset any user's password to a given value (default 123456).
+
+    Body (JSON):
+      admin_mobile  | admin_user_id  – auth
+      mobile_number | user_id        – target user
+      new_password                   – optional, defaults to "123456"
+    """
+    import os
+    SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
+
+    data = request.get_json(silent=True) or {}
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    admin_mobile  = str(data.get("admin_mobile") or "").strip()
+    admin_user_id = data.get("admin_user_id")
+
+    if admin_mobile == SUPER_ADMIN_MOBILE:
+        pass  # super-admin always allowed
+    elif admin_user_id:
+        try:
+            admin = User.query.get(int(admin_user_id))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid admin_user_id"}), 401
+        if not admin or not getattr(admin, "isadmin", False):
+            return jsonify({"error": "Admin access required"}), 403
+    else:
+        return jsonify({"error": "admin_mobile or admin_user_id required"}), 401
+
+    # ── Resolve target user ────────────────────────────────────────────────────
+    mobile_number = str(data.get("mobile_number") or "").strip()
+    user_id       = data.get("user_id")
+    new_password  = str(data.get("new_password") or "123456").strip()
+
+    if mobile_number:
+        user = User.query.filter_by(mobile_number=mobile_number).first()
+    elif user_id:
+        try:
+            user = User.query.get(int(user_id))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid user_id"}), 400
+    else:
+        return jsonify({"error": "mobile_number or user_id required"}), 400
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # ── Reset password (store plain-text to match existing auth) ──────────────
+    try:
+        user.password              = new_password
+        user.force_password_change = True
+        db.session.commit()
+        return jsonify({
+            "status":    "success",
+            "message":   f"Password reset for {user.first_name} {user.last_name}.",
+            "user_id":   user.id,
+            "user_name": f"{user.first_name} {user.last_name}",
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error("admin_reset_password error: %s", e)
+        return jsonify({"error": "Database error"}), 500
 
 
 @app.route('/book', methods=['POST'])
@@ -1115,15 +1197,15 @@ def login():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Query the user by mobile_number — also fetch zone_code for local notifications
+        # Query the user by mobile_number — also fetch zone_code and force_password_change
         cursor.execute(
-            "SELECT id, password, zone_code FROM users WHERE mobile_number = %s",
+            "SELECT id, password, zone_code, force_password_change FROM users WHERE mobile_number = %s",
             (mobile_number,)
         )
         user = cursor.fetchone()
 
         if user:
-            user_id, stored_password, zone_code = user
+            user_id, stored_password, zone_code, force_pwd_change = user
 
             # Verify the password
             if stored_password == password:
@@ -1131,6 +1213,7 @@ def login():
                     "message": "Login successful",
                     "user_id": user_id,
                     "zone_code": zone_code or "",
+                    "force_password_change": bool(force_pwd_change),
                 }), 200
             else:
                 return jsonify({"error": "Invalid password"}), 401

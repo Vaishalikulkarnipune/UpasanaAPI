@@ -53,6 +53,9 @@ class User(db.Model):
     is_canary_user = db.Column(db.Boolean, default=False)
     isadmin = db.Column(db.Boolean, default=False)
 
+    # Set to True by admin password-reset; user must choose new password on next login
+    force_password_change = db.Column(db.Boolean, default=False, nullable=False)
+
     # Relationships
     bookings = relationship("Booking", back_populates="user")
     sunday_bookings = relationship("SundayBooking", back_populates="user")
@@ -347,6 +350,10 @@ class AdhikMaasSubmission(db.Model):
     has_seva_mahaprasad = Column(Boolean, default=False, nullable=False)
     seva_time           = Column(String(20))          # 'afternoon' | 'evening' | 'any' | None
     has_shejarti        = Column(Boolean, default=False, nullable=False)
+
+    # Admin-assigned route schedule & confirmed seva
+    route_date          = Column(Date)                  # actual date of visit
+    final_seva          = Column(String(255))           # confirmed seva label shown to user
 
     # Admin shortlist / finalise workflow
     is_shortlisted      = Column(Boolean, default=False, nullable=False)
