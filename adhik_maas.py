@@ -455,17 +455,22 @@ def get_summary_admin():
     shortlisted = sum(1 for s in all_subs if s.is_shortlisted)
     finalized   = sum(1 for s in all_subs if s.is_finalized)
 
+    # Re-derive flags from seva_preference for every submission so that old
+    # records with NULL boolean columns are counted correctly.
+    def _flags(s):
+        return _parse_seva_flags(s.seva_preference)
+
     # ── seva breakdown
     seva_counts = {
-        "padyapuja":      sum(1 for s in all_subs if s.has_padyapuja),
-        "seva_mahaprasad":sum(1 for s in all_subs if s.has_seva_mahaprasad),
-        "shejarti":       sum(1 for s in all_subs if s.has_shejarti),
+        "padyapuja":       sum(1 for s in all_subs if _flags(s)["has_padyapuja"]),
+        "seva_mahaprasad": sum(1 for s in all_subs if _flags(s)["has_seva_mahaprasad"]),
+        "shejarti":        sum(1 for s in all_subs if _flags(s)["has_shejarti"]),
     }
 
     # ── time breakdown
     time_counts = defaultdict(int)
     for s in all_subs:
-        key = s.seva_time if s.seva_time else "none"
+        key = _flags(s)["seva_time"] or "none"
         time_counts[key] += 1
 
     # ── area breakdown
@@ -481,15 +486,16 @@ def get_summary_admin():
             route_counts[key] = {"route_number": key, "route_name": s.route_name or "", "count": 0}
         route_counts[key]["count"] += 1
 
-    # ── permutation combinations
+    # ── permutation combinations (also re-derived so badges are correct)
     combo_map = defaultdict(list)
     for s in all_subs:
-        u   = User.query.get(s.user_id)
-        key = (
-            bool(s.has_padyapuja),
-            bool(s.has_seva_mahaprasad),
-            s.seva_time or "none",
-            bool(s.has_shejarti),
+        u    = User.query.get(s.user_id)
+        f    = _flags(s)
+        key  = (
+            f["has_padyapuja"],
+            f["has_seva_mahaprasad"],
+            f["seva_time"] or "none",
+            f["has_shejarti"],
         )
         combo_map[key].append(_submission_dict(s, u))
 
