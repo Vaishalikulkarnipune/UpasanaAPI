@@ -176,26 +176,29 @@ def get_areas():
     pin_filter = (request.args.get("pin_code") or "").strip()
     q_filter   = (request.args.get("q") or "").strip().lower()
 
-    query = AdhikMaasArea.query.filter_by(is_active=True)
-    if pin_filter:
-        query = query.filter(AdhikMaasArea.pin_code == pin_filter)
-    rows = query.order_by(AdhikMaasArea.route_number, AdhikMaasArea.sort_order).all()
+    try:
+        query = AdhikMaasArea.query.filter_by(is_active=True)
+        if pin_filter:
+            query = query.filter(AdhikMaasArea.pin_code == pin_filter)
+        rows = query.order_by(AdhikMaasArea.route_number, AdhikMaasArea.sort_order).all()
 
-    if q_filter:
-        rows = [r for r in rows if q_filter in r.area_name.lower() or q_filter in r.pin_code]
+        if q_filter:
+            rows = [r for r in rows if q_filter in r.area_name.lower() or q_filter in r.pin_code]
 
-    # Group into ordered dict by route
-    route_map: OrderedDict = OrderedDict()
-    for r in rows:
-        key = r.route_number
-        if key not in route_map:
-            route_map[key] = {"route_number": r.route_number, "route_name": r.route_name, "areas": []}
-        route_map[key]["areas"].append({"area_name": r.area_name, "pin_code": r.pin_code})
+        route_map: OrderedDict = OrderedDict()
+        for r in rows:
+            key = r.route_number
+            if key not in route_map:
+                route_map[key] = {"route_number": r.route_number, "route_name": r.route_name, "areas": []}
+            route_map[key]["areas"].append({"area_name": r.area_name, "pin_code": r.pin_code})
 
-    return jsonify({
-        "routes": list(route_map.values()),
-        "flat":   [r.area_name for r in rows],
-    }), 200
+        return jsonify({
+            "routes": list(route_map.values()),
+            "flat":   [r.area_name for r in rows],
+        }), 200
+    except Exception as e:
+        logging.exception("get_areas error: %s", e)
+        return jsonify({"error": "Failed to fetch areas"}), 500
 
 
 @router.route("/adhik-maas/my-submission", methods=["GET"])
@@ -208,26 +211,30 @@ def get_my_submission():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid user_id"}), 400
 
-    from model import AdhikMaasSubmission
-    s = AdhikMaasSubmission.query.filter_by(user_id=user_id).first()
-    if not s:
-        return jsonify({"submitted": False}), 200
+    try:
+        from model import AdhikMaasSubmission
+        s = AdhikMaasSubmission.query.filter_by(user_id=user_id).first()
+        if not s:
+            return jsonify({"submitted": False}), 200
 
-    return jsonify({
-        "submitted":           True,
-        "id":                  s.id,
-        "seva_preference":     s.seva_preference,
-        "seva_label":          s.seva_label,
-        "area":                s.area,
-        "route_number":        getattr(s, "route_number", None),
-        "route_name":          getattr(s, "route_name", None),
-        "pin_code":            getattr(s, "pin_code", None),
-        "has_padyapuja":       bool(getattr(s, "has_padyapuja", False)),
-        "has_seva_mahaprasad": bool(getattr(s, "has_seva_mahaprasad", False)),
-        "seva_time":           getattr(s, "seva_time", None),
-        "has_shejarti":        bool(getattr(s, "has_shejarti", False)),
-        "submitted_at":        s.submitted_at.isoformat() if s.submitted_at else None,
-    }), 200
+        return jsonify({
+            "submitted":           True,
+            "id":                  s.id,
+            "seva_preference":     s.seva_preference,
+            "seva_label":          s.seva_label,
+            "area":                s.area,
+            "route_number":        getattr(s, "route_number", None),
+            "route_name":          getattr(s, "route_name", None),
+            "pin_code":            getattr(s, "pin_code", None),
+            "has_padyapuja":       bool(getattr(s, "has_padyapuja", False)),
+            "has_seva_mahaprasad": bool(getattr(s, "has_seva_mahaprasad", False)),
+            "seva_time":           getattr(s, "seva_time", None),
+            "has_shejarti":        bool(getattr(s, "has_shejarti", False)),
+            "submitted_at":        s.submitted_at.isoformat() if s.submitted_at else None,
+        }), 200
+    except Exception as e:
+        logging.exception("get_my_submission error: %s", e)
+        return jsonify({"error": "Failed to fetch submission"}), 500
 
 
 @router.route("/adhik-maas/submit", methods=["POST"])
@@ -348,11 +355,14 @@ def list_submissions_admin():
     err, status = _require_admin()
     if err is not None:
         return err, status
-    from model import AdhikMaasSubmission, User
-
-    submissions = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.submitted_at.desc()).all()
-    out = [_submission_dict(s, User.query.get(s.user_id)) for s in submissions]
-    return jsonify({"submissions": out, "total": len(out)}), 200
+    try:
+        from model import AdhikMaasSubmission, User
+        submissions = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.submitted_at.desc()).all()
+        out = [_submission_dict(s, User.query.get(s.user_id)) for s in submissions]
+        return jsonify({"submissions": out, "total": len(out)}), 200
+    except Exception as e:
+        logging.exception("list_submissions_admin error: %s", e)
+        return jsonify({"error": "Failed to fetch submissions"}), 500
 
 
 @router.route("/adhik-maas/submissions/<int:submission_id>", methods=["PUT"])
@@ -446,80 +456,85 @@ def get_summary_admin():
     err, status = _require_admin()
     if err is not None:
         return err, status
-    from model import AdhikMaasSubmission, User
 
-    all_subs = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.area).all()
+    try:
+        from model import AdhikMaasSubmission, User
 
-    # ── totals
-    total       = len(all_subs)
-    shortlisted = sum(1 for s in all_subs if s.is_shortlisted)
-    finalized   = sum(1 for s in all_subs if s.is_finalized)
+        all_subs = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.area).all()
 
-    # Re-derive flags from seva_preference for every submission so that old
-    # records with NULL boolean columns are counted correctly.
-    def _flags(s):
-        return _parse_seva_flags(s.seva_preference)
+        # ── totals
+        total       = len(all_subs)
+        shortlisted = sum(1 for s in all_subs if s.is_shortlisted)
+        finalized   = sum(1 for s in all_subs if s.is_finalized)
 
-    # ── seva breakdown
-    seva_counts = {
-        "padyapuja":       sum(1 for s in all_subs if _flags(s)["has_padyapuja"]),
-        "seva_mahaprasad": sum(1 for s in all_subs if _flags(s)["has_seva_mahaprasad"]),
-        "shejarti":        sum(1 for s in all_subs if _flags(s)["has_shejarti"]),
-    }
+        # Re-derive flags from seva_preference for every submission so that old
+        # records with NULL boolean columns are counted correctly.
+        def _flags(s):
+            return _parse_seva_flags(s.seva_preference)
 
-    # ── time breakdown
-    time_counts = defaultdict(int)
-    for s in all_subs:
-        key = _flags(s)["seva_time"] or "none"
-        time_counts[key] += 1
+        # ── seva breakdown
+        seva_counts = {
+            "padyapuja":       sum(1 for s in all_subs if _flags(s)["has_padyapuja"]),
+            "seva_mahaprasad": sum(1 for s in all_subs if _flags(s)["has_seva_mahaprasad"]),
+            "shejarti":        sum(1 for s in all_subs if _flags(s)["has_shejarti"]),
+        }
 
-    # ── area breakdown
-    area_counts = defaultdict(int)
-    for s in all_subs:
-        area_counts[s.area or "Unknown"] += 1
+        # ── time breakdown
+        time_counts = defaultdict(int)
+        for s in all_subs:
+            key = _flags(s)["seva_time"] or "none"
+            time_counts[key] += 1
 
-    # ── route breakdown
-    route_counts: dict = {}
-    for s in all_subs:
-        key = s.route_number or "Unknown"
-        if key not in route_counts:
-            route_counts[key] = {"route_number": key, "route_name": s.route_name or "", "count": 0}
-        route_counts[key]["count"] += 1
+        # ── area breakdown
+        area_counts = defaultdict(int)
+        for s in all_subs:
+            area_counts[s.area or "Unknown"] += 1
 
-    # ── permutation combinations (also re-derived so badges are correct)
-    combo_map = defaultdict(list)
-    for s in all_subs:
-        u    = User.query.get(s.user_id)
-        f    = _flags(s)
-        key  = (
-            f["has_padyapuja"],
-            f["has_seva_mahaprasad"],
-            f["seva_time"] or "none",
-            f["has_shejarti"],
-        )
-        combo_map[key].append(_submission_dict(s, u))
+        # ── route breakdown
+        route_counts: dict = {}
+        for s in all_subs:
+            key = s.route_number or "Unknown"
+            if key not in route_counts:
+                route_counts[key] = {"route_number": key, "route_name": s.route_name or "", "count": 0}
+            route_counts[key]["count"] += 1
 
-    combinations = []
-    for (padya, seva_mp, time, shejarti), users in sorted(combo_map.items(), key=lambda x: -len(x[1])):
-        combinations.append({
-            "has_padyapuja":       padya,
-            "has_seva_mahaprasad": seva_mp,
-            "seva_time":           time if time != "none" else None,
-            "has_shejarti":        shejarti,
-            "count":               len(users),
-            "users":               users,
-        })
+        # ── permutation combinations (also re-derived so badges are correct)
+        combo_map = defaultdict(list)
+        for s in all_subs:
+            u    = User.query.get(s.user_id)
+            f    = _flags(s)
+            key  = (
+                f["has_padyapuja"],
+                f["has_seva_mahaprasad"],
+                f["seva_time"] or "none",
+                f["has_shejarti"],
+            )
+            combo_map[key].append(_submission_dict(s, u))
 
-    return jsonify({
-        "total":        total,
-        "shortlisted":  shortlisted,
-        "finalized":    finalized,
-        "seva_counts":  dict(seva_counts),
-        "time_counts":  dict(time_counts),
-        "area_counts":  dict(area_counts),
-        "route_counts": sorted(route_counts.values(), key=lambda x: x["route_number"]),
-        "combinations": combinations,
-    }), 200
+        combinations = []
+        for (padya, seva_mp, time, shejarti), users in sorted(combo_map.items(), key=lambda x: -len(x[1])):
+            combinations.append({
+                "has_padyapuja":       padya,
+                "has_seva_mahaprasad": seva_mp,
+                "seva_time":           time if time != "none" else None,
+                "has_shejarti":        shejarti,
+                "count":               len(users),
+                "users":               users,
+            })
+
+        return jsonify({
+            "total":        total,
+            "shortlisted":  shortlisted,
+            "finalized":    finalized,
+            "seva_counts":  dict(seva_counts),
+            "time_counts":  dict(time_counts),
+            "area_counts":  dict(area_counts),
+            "route_counts": sorted(route_counts.values(), key=lambda x: x["route_number"]),
+            "combinations": combinations,
+        }), 200
+    except Exception as e:
+        logging.exception("get_summary_admin error: %s", e)
+        return jsonify({"error": "Failed to build summary"}), 500
 
 
 # ─── Admin: shortlist workflow ─────────────────────────────────────────────────
@@ -567,11 +582,14 @@ def list_shortlisted():
     err, status = _require_admin()
     if err is not None:
         return err, status
-    from model import AdhikMaasSubmission, User
-
-    subs = AdhikMaasSubmission.query.filter_by(is_shortlisted=True).order_by(AdhikMaasSubmission.area).all()
-    out  = [_submission_dict(s, User.query.get(s.user_id)) for s in subs]
-    return jsonify({"shortlisted": out, "total": len(out)}), 200
+    try:
+        from model import AdhikMaasSubmission, User
+        subs = AdhikMaasSubmission.query.filter_by(is_shortlisted=True).order_by(AdhikMaasSubmission.area).all()
+        out  = [_submission_dict(s, User.query.get(s.user_id)) for s in subs]
+        return jsonify({"shortlisted": out, "total": len(out)}), 200
+    except Exception as e:
+        logging.exception("list_shortlisted error: %s", e)
+        return jsonify({"error": "Failed to fetch shortlisted submissions"}), 500
 
 
 # ─── Admin: finalize workflow ──────────────────────────────────────────────────
@@ -619,11 +637,14 @@ def list_finalized():
     err, status = _require_admin()
     if err is not None:
         return err, status
-    from model import AdhikMaasSubmission, User
-
-    subs = AdhikMaasSubmission.query.filter_by(is_finalized=True).order_by(AdhikMaasSubmission.area).all()
-    out  = [_submission_dict(s, User.query.get(s.user_id)) for s in subs]
-    return jsonify({"finalized": out, "total": len(out)}), 200
+    try:
+        from model import AdhikMaasSubmission, User
+        subs = AdhikMaasSubmission.query.filter_by(is_finalized=True).order_by(AdhikMaasSubmission.area).all()
+        out  = [_submission_dict(s, User.query.get(s.user_id)) for s in subs]
+        return jsonify({"finalized": out, "total": len(out)}), 200
+    except Exception as e:
+        logging.exception("list_finalized error: %s", e)
+        return jsonify({"error": "Failed to fetch finalized submissions"}), 500
 
 
 @router.route("/adhik-maas/public-finalized", methods=["GET"])
@@ -633,40 +654,44 @@ def public_list_finalized():
     Only accessible when the feature-toggle 'adhik_maas_2026_list_finalized' is TRUE.
     Returns a trimmed payload (no admin workflow fields).
     """
-    from model import AdhikMaasSubmission, User, FeatureToggle
+    try:
+        from model import AdhikMaasSubmission, User, FeatureToggle
 
-    toggle = FeatureToggle.query.filter_by(toggle_name="adhik_maas_2026_list_finalized").first()
-    if not toggle or not toggle.toggle_enabled:
-        return jsonify({"error": "List not yet published"}), 403
+        toggle = FeatureToggle.query.filter_by(toggle_name="adhik_maas_2026_list_finalized").first()
+        if not toggle or not toggle.toggle_enabled:
+            return jsonify({"error": "List not yet published"}), 403
 
-    subs = (
-        AdhikMaasSubmission.query
-        .filter_by(is_finalized=True)
-        .order_by(AdhikMaasSubmission.route_date, AdhikMaasSubmission.area)
-        .all()
-    )
+        subs = (
+            AdhikMaasSubmission.query
+            .filter_by(is_finalized=True)
+            .order_by(AdhikMaasSubmission.route_date, AdhikMaasSubmission.area)
+            .all()
+        )
 
-    def _public_dict(s):
-        u = User.query.get(s.user_id)
-        return {
-            "id":           s.id,
-            "user_name":    f"{u.first_name} {u.last_name}".strip() if u else "",
-            "flat_no":      getattr(u, "flat_no", None)       if u else None,
-            "full_address": getattr(u, "full_address", None)  if u else None,
-            "landmark":     getattr(u, "landmark", None)      if u else None,
-            "city":         getattr(u, "city", None)          if u else None,
-            "state":        getattr(u, "state", None)         if u else None,
-            "area":         s.area,
-            "route_number": getattr(s, "route_number", None),
-            "route_name":   getattr(s, "route_name", None),
-            "route_date":   getattr(s, "route_date").isoformat() if getattr(s, "route_date", None) else None,
-            "final_seva":   getattr(s, "final_seva", None),
-            "seva_label":   getattr(s, "seva_label", None),
-            "finalized_at": s.finalized_at.isoformat() if s.finalized_at else None,
-        }
+        def _public_dict(s):
+            u = User.query.get(s.user_id)
+            return {
+                "id":           s.id,
+                "user_name":    f"{u.first_name} {u.last_name}".strip() if u else "",
+                "flat_no":      getattr(u, "flat_no", None)       if u else None,
+                "full_address": getattr(u, "full_address", None)  if u else None,
+                "landmark":     getattr(u, "landmark", None)      if u else None,
+                "city":         getattr(u, "city", None)          if u else None,
+                "state":        getattr(u, "state", None)         if u else None,
+                "area":         s.area,
+                "route_number": getattr(s, "route_number", None),
+                "route_name":   getattr(s, "route_name", None),
+                "route_date":   getattr(s, "route_date").isoformat() if getattr(s, "route_date", None) else None,
+                "final_seva":   getattr(s, "final_seva", None),
+                "seva_label":   getattr(s, "seva_label", None),
+                "finalized_at": s.finalized_at.isoformat() if s.finalized_at else None,
+            }
 
-    out = [_public_dict(s) for s in subs]
-    return jsonify({"finalized": out, "total": len(out)}), 200
+        out = [_public_dict(s) for s in subs]
+        return jsonify({"finalized": out, "total": len(out)}), 200
+    except Exception as e:
+        logging.exception("public_list_finalized error: %s", e)
+        return jsonify({"error": "Failed to fetch finalized list"}), 500
 
 
 # ─── Seva options config ──────────────────────────────────────────────────────
@@ -697,10 +722,14 @@ def get_seva_options():
       "shejarti":        false
     }
     """
-    return jsonify({
-        key: _seva_toggle_enabled(toggle_name)
-        for key, toggle_name in _SEVA_TOGGLE_MAP.items()
-    }), 200
+    try:
+        return jsonify({
+            key: _seva_toggle_enabled(toggle_name)
+            for key, toggle_name in _SEVA_TOGGLE_MAP.items()
+        }), 200
+    except Exception as e:
+        logging.exception("get_seva_options error: %s", e)
+        return jsonify({"error": "Failed to fetch seva options"}), 500
 
 
 @router.route("/adhik-maas/seva-options", methods=["POST"])
@@ -774,52 +803,57 @@ def get_map_data():
     err, status = _require_admin()
     if err is not None:
         return err, status
-    from model import db, AdhikMaasSubmission, User
 
-    submissions = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.submitted_at.desc()).all()
-    out = []
-    for s in submissions:
-        u = User.query.get(s.user_id)
-        if not u:
-            continue
-        name      = f"{u.first_name} {u.last_name}".strip() or f"User #{s.user_id}"
-        seva_type = s.seva_label or s.seva_preference or ""
-        address   = getattr(u, "full_address", None)
-        lat = lon = None
-        if getattr(u, "latitude", None) is not None and getattr(u, "longitude", None) is not None:
-            try:
-                lat, lon = float(u.latitude), float(u.longitude)
-            except (TypeError, ValueError):
-                pass
-        if (lat is None or lon is None) and address:
-            lat, lon = _geocode_address(address)
-            if lat is not None:
+    try:
+        from model import db, AdhikMaasSubmission, User
+
+        submissions = AdhikMaasSubmission.query.order_by(AdhikMaasSubmission.submitted_at.desc()).all()
+        out = []
+        for s in submissions:
+            u = User.query.get(s.user_id)
+            if not u:
+                continue
+            name      = f"{u.first_name} {u.last_name}".strip() or f"User #{s.user_id}"
+            seva_type = s.seva_label or s.seva_preference or ""
+            address   = getattr(u, "full_address", None)
+            lat = lon = None
+            if getattr(u, "latitude", None) is not None and getattr(u, "longitude", None) is not None:
                 try:
-                    u.latitude  = lat
-                    u.longitude = lon
-                    db.session.add(u)
-                    db.session.commit()
-                except Exception as e:
-                    logging.warning("Failed to save lat/lng for user %s: %s", s.user_id, e)
-                    db.session.rollback()
-        if lat is None or lon is None:
-            lat, lon = 18.5204, 73.8567
-        out.append({
-            "id":               s.id,
-            "user_id":          s.user_id,
-            "name":             name,
-            "seva_type":        seva_type,
-            "seva_preference":  s.seva_preference,
-            "has_padyapuja":    bool(s.has_padyapuja),
-            "has_seva_mahaprasad": bool(s.has_seva_mahaprasad),
-            "seva_time":        s.seva_time,
-            "has_shejarti":     bool(s.has_shejarti),
-            "is_shortlisted":   bool(s.is_shortlisted),
-            "is_finalized":     bool(s.is_finalized),
-            "latitude":         round(lat, 6),
-            "longitude":        round(lon, 6),
-        })
-    return jsonify(out), 200
+                    lat, lon = float(u.latitude), float(u.longitude)
+                except (TypeError, ValueError):
+                    pass
+            if (lat is None or lon is None) and address:
+                lat, lon = _geocode_address(address)
+                if lat is not None:
+                    try:
+                        u.latitude  = lat
+                        u.longitude = lon
+                        db.session.add(u)
+                        db.session.commit()
+                    except Exception as e:
+                        logging.warning("Failed to save lat/lng for user %s: %s", s.user_id, e)
+                        db.session.rollback()
+            if lat is None or lon is None:
+                lat, lon = 18.5204, 73.8567
+            out.append({
+                "id":               s.id,
+                "user_id":          s.user_id,
+                "name":             name,
+                "seva_type":        seva_type,
+                "seva_preference":  s.seva_preference,
+                "has_padyapuja":    bool(s.has_padyapuja),
+                "has_seva_mahaprasad": bool(s.has_seva_mahaprasad),
+                "seva_time":        s.seva_time,
+                "has_shejarti":     bool(s.has_shejarti),
+                "is_shortlisted":   bool(s.is_shortlisted),
+                "is_finalized":     bool(s.is_finalized),
+                "latitude":         round(lat, 6),
+                "longitude":        round(lon, 6),
+            })
+        return jsonify(out), 200
+    except Exception as e:
+        logging.exception("get_map_data error: %s", e)
+        return jsonify({"error": "Failed to build map data"}), 500
 
 
 # ─── Export endpoint ──────────────────────────────────────────────────────────
@@ -846,113 +880,115 @@ def export_submissions():
     if err is not None:
         return err, status_code
 
-    import io
-    import pandas as pd
-    from flask import send_file, Response
-    from model import AdhikMaasSubmission, User
+    try:
+        import io
+        import pandas as pd
+        from flask import send_file, Response
+        from model import AdhikMaasSubmission, User
 
-    fmt           = request.args.get("format", "csv").lower()
-    status_filter = request.args.get("status", "all").lower()
-    search        = request.args.get("search", "").strip().lower()
+        fmt           = request.args.get("format", "csv").lower()
+        status_filter = request.args.get("status", "all").lower()
+        search        = request.args.get("search", "").strip().lower()
 
-    query = AdhikMaasSubmission.query.join(User, AdhikMaasSubmission.user_id == User.id)
-    if status_filter == "shortlisted":
-        query = query.filter(AdhikMaasSubmission.is_shortlisted == True)
-    elif status_filter == "finalized":
-        query = query.filter(AdhikMaasSubmission.is_finalized == True)
+        query = AdhikMaasSubmission.query.join(User, AdhikMaasSubmission.user_id == User.id)
+        if status_filter == "shortlisted":
+            query = query.filter(AdhikMaasSubmission.is_shortlisted == True)
+        elif status_filter == "finalized":
+            query = query.filter(AdhikMaasSubmission.is_finalized == True)
 
-    submissions = query.order_by(
-        AdhikMaasSubmission.route_number,
-        AdhikMaasSubmission.area,
-    ).all()
+        submissions = query.order_by(
+            AdhikMaasSubmission.route_number,
+            AdhikMaasSubmission.area,
+        ).all()
 
-    rows = []
-    for s in submissions:
-        u = User.query.get(s.user_id)
-        if not u:
-            continue
+        rows = []
+        for s in submissions:
+            u = User.query.get(s.user_id)
+            if not u:
+                continue
 
-        name = " ".join(filter(None, [u.first_name, u.middle_name, u.last_name]))
+            name = " ".join(filter(None, [u.first_name, u.middle_name, u.last_name]))
 
-        if search and not any(
-            search in str(v).lower()
-            for v in [name, u.mobile_number, s.area, s.route_name, s.route_number]
-            if v
-        ):
-            continue
+            if search and not any(
+                search in str(v).lower()
+                for v in [name, u.mobile_number, s.area, s.route_name, s.route_number]
+                if v
+            ):
+                continue
 
-        address = ", ".join(filter(None, [
-            u.flat_no, u.full_address, u.landmark,
-            u.area, u.city, u.state, u.pincode,
-        ]))
+            address = ", ".join(filter(None, [
+                u.flat_no, u.full_address, u.landmark,
+                u.area, u.city, u.state, u.pincode,
+            ]))
 
-        rows.append({
-            "Name":               name,
-            "Mobile":             u.mobile_number     or "",
-            "Zone":               u.zone_code         or "",
-            "Reg. Area":          u.area              or "",
-            "Address":            address,
-            "Route No.":          s.route_number      or "",
-            "Route Name":         s.route_name        or "",
-            "Submission Area":    s.area              or "",
-            "PIN Code":           s.pin_code          or "",
-            "Padyapuja":          "Yes" if s.has_padyapuja        else "No",
-            "Seva + Mahaprasad":  "Yes" if s.has_seva_mahaprasad  else "No",
-            "Time Preference":    _TIME_LABELS.get(s.seva_time, s.seva_time or "—"),
-            "Shejarti & Kaakad":  "Yes" if s.has_shejarti         else "No",
-            "Seva Label":         s.seva_label        or "",
-            "Route Date":         s.route_date.strftime("%d %b %Y") if s.route_date else "",
-            "Final Seva":         s.final_seva        or "",
-            "Shortlisted":        "Yes" if s.is_shortlisted  else "No",
-            "Finalized":          "Yes" if s.is_finalized    else "No",
-            "Finalized At":       s.finalized_at.strftime("%d %b %Y %H:%M") if s.finalized_at else "",
-            "Admin Notes":        s.admin_notes       or "",
-            "Submitted At":       s.submitted_at.strftime("%d %b %Y %H:%M") if s.submitted_at else "",
-        })
+            rows.append({
+                "Name":               name,
+                "Mobile":             u.mobile_number     or "",
+                "Zone":               u.zone_code         or "",
+                "Reg. Area":          u.area              or "",
+                "Address":            address,
+                "Route No.":          s.route_number      or "",
+                "Route Name":         s.route_name        or "",
+                "Submission Area":    s.area              or "",
+                "PIN Code":           s.pin_code          or "",
+                "Padyapuja":          "Yes" if s.has_padyapuja        else "No",
+                "Seva + Mahaprasad":  "Yes" if s.has_seva_mahaprasad  else "No",
+                "Time Preference":    _TIME_LABELS.get(s.seva_time, s.seva_time or "—"),
+                "Shejarti & Kaakad":  "Yes" if s.has_shejarti         else "No",
+                "Seva Label":         s.seva_label        or "",
+                "Route Date":         s.route_date.strftime("%d %b %Y") if s.route_date else "",
+                "Final Seva":         s.final_seva        or "",
+                "Shortlisted":        "Yes" if s.is_shortlisted  else "No",
+                "Finalized":          "Yes" if s.is_finalized    else "No",
+                "Finalized At":       s.finalized_at.strftime("%d %b %Y %H:%M") if s.finalized_at else "",
+                "Admin Notes":        s.admin_notes       or "",
+                "Submitted At":       s.submitted_at.strftime("%d %b %Y %H:%M") if s.submitted_at else "",
+            })
 
-    if not rows:
-        return jsonify({"error": "No data to export for the selected filter"}), 404
+        if not rows:
+            return jsonify({"error": "No data to export for the selected filter"}), 404
 
-    df = pd.DataFrame(rows)
-    date_str     = datetime.utcnow().strftime("%Y-%m-%d")
-    status_label = status_filter.capitalize()
+        df = pd.DataFrame(rows)
+        date_str     = datetime.utcnow().strftime("%Y-%m-%d")
+        status_label = status_filter.capitalize()
 
-    if fmt == "xlsx":
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            sheet_name = status_label[:31]
-            df.to_excel(writer, index=False, sheet_name=sheet_name)
-            ws = writer.sheets[sheet_name]
-            # Bold header row
-            from openpyxl.styles import Font, PatternFill, Alignment
-            header_fill = PatternFill("solid", fgColor="F15700")
-            for cell in ws[1]:
-                cell.font      = Font(bold=True, color="FFFFFF")
-                cell.fill      = header_fill
-                cell.alignment = Alignment(horizontal="center")
-            # Auto-fit column widths
-            for col in ws.columns:
-                width = max((len(str(cell.value or "")) for cell in col), default=8)
-                ws.column_dimensions[col[0].column_letter].width = min(width + 4, 55)
-        output.seek(0)
-        return send_file(
-            output,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            as_attachment=True,
-            download_name=f"Adhik_Maas_{status_label}_{date_str}.xlsx",
-        )
-    else:
-        output = io.StringIO()
-        output.write("\ufeff")          # UTF-8 BOM so Excel opens it cleanly
-        df.to_csv(output, index=False)
-        return Response(
-            output.getvalue(),
-            mimetype="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition":
-                    f'attachment; filename="adhik_maas_{status_filter}_{date_str}.csv"',
-            },
-        )
+        if fmt == "xlsx":
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                sheet_name = status_label[:31]
+                df.to_excel(writer, index=False, sheet_name=sheet_name)
+                ws = writer.sheets[sheet_name]
+                from openpyxl.styles import Font, PatternFill, Alignment
+                header_fill = PatternFill("solid", fgColor="F15700")
+                for cell in ws[1]:
+                    cell.font      = Font(bold=True, color="FFFFFF")
+                    cell.fill      = header_fill
+                    cell.alignment = Alignment(horizontal="center")
+                for col in ws.columns:
+                    width = max((len(str(cell.value or "")) for cell in col), default=8)
+                    ws.column_dimensions[col[0].column_letter].width = min(width + 4, 55)
+            output.seek(0)
+            return send_file(
+                output,
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                as_attachment=True,
+                download_name=f"Adhik_Maas_{status_label}_{date_str}.xlsx",
+            )
+        else:
+            output = io.StringIO()
+            output.write("\ufeff")          # UTF-8 BOM so Excel opens it cleanly
+            df.to_csv(output, index=False)
+            return Response(
+                output.getvalue(),
+                mimetype="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition":
+                        f'attachment; filename="adhik_maas_{status_filter}_{date_str}.csv"',
+                },
+            )
+    except Exception as e:
+        logging.exception("export_submissions error: %s", e)
+        return jsonify({"error": "Failed to export submissions"}), 500
 
 
 # ─── Day Summary (public) ─────────────────────────────────────────────────────
@@ -980,50 +1016,53 @@ def adhik_maas_day_summary():
     except ValueError:
         return jsonify({"error": "invalid date format, use YYYY-MM-DD"}), 400
 
-    subs = (
-        AdhikMaasSubmission.query
-        .filter(
-            AdhikMaasSubmission.route_date == date_obj,
-            AdhikMaasSubmission.is_finalized == True,
+    try:
+        subs = (
+            AdhikMaasSubmission.query
+            .filter(
+                AdhikMaasSubmission.route_date == date_obj,
+                AdhikMaasSubmission.is_finalized == True,
+            )
+            .all()
         )
-        .all()
-    )
 
-    if not subs:
+        if not subs:
+            return jsonify({
+                "date":         date_str,
+                "route_number": None,
+                "route_name":   None,
+                "total":        0,
+                "sevas": {
+                    "padyapuja":          0,
+                    "abhishek_afternoon": 0,
+                    "abhishek_evening":   0,
+                    "shejarti":           0,
+                    "mahaprasad":         0,
+                },
+            }), 200
+
+        route_number = subs[0].route_number
+        route_name   = subs[0].route_name
+
+        padyapuja          = sum(1 for s in subs if s.has_padyapuja)
+        abhishek_afternoon = sum(1 for s in subs if s.seva_time in ("afternoon",))
+        abhishek_evening   = sum(1 for s in subs if s.seva_time in ("evening", "any"))
+        shejarti           = sum(1 for s in subs if s.has_shejarti)
+        mahaprasad         = sum(1 for s in subs if s.has_seva_mahaprasad)
+
         return jsonify({
             "date":         date_str,
-            "route_number": None,
-            "route_name":   None,
-            "total":        0,
+            "route_number": route_number,
+            "route_name":   route_name,
+            "total":        len(subs),
             "sevas": {
-                "padyapuja":          0,
-                "abhishek_afternoon": 0,
-                "abhishek_evening":   0,
-                "shejarti":           0,
-                "mahaprasad":         0,
+                "padyapuja":          padyapuja,
+                "abhishek_afternoon": abhishek_afternoon,
+                "abhishek_evening":   abhishek_evening,
+                "shejarti":           shejarti,
+                "mahaprasad":         mahaprasad,
             },
         }), 200
-
-    # All finalized submissions for a route_date share the same route
-    route_number = subs[0].route_number
-    route_name   = subs[0].route_name
-
-    padyapuja          = sum(1 for s in subs if s.has_padyapuja)
-    abhishek_afternoon = sum(1 for s in subs if s.seva_time in ("afternoon",))
-    abhishek_evening   = sum(1 for s in subs if s.seva_time in ("evening", "any"))
-    shejarti           = sum(1 for s in subs if s.has_shejarti)
-    mahaprasad         = sum(1 for s in subs if s.has_seva_mahaprasad)
-
-    return jsonify({
-        "date":         date_str,
-        "route_number": route_number,
-        "route_name":   route_name,
-        "total":        len(subs),
-        "sevas": {
-            "padyapuja":          padyapuja,
-            "abhishek_afternoon": abhishek_afternoon,
-            "abhishek_evening":   abhishek_evening,
-            "shejarti":           shejarti,
-            "mahaprasad":         mahaprasad,
-        },
-    }), 200
+    except Exception as e:
+        logging.exception("adhik_maas_day_summary error: %s", e)
+        return jsonify({"error": "Failed to fetch day summary"}), 500

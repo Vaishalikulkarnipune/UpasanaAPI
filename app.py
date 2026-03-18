@@ -16,7 +16,6 @@ from adhik_maas import router as adhik_maas_bp
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
-app.config["DEBUG"] = True  # This enables debug mode
 app.config.from_object(Config)
 
 # Register the janmostav blueprint
@@ -88,66 +87,84 @@ def get_feature_toggle(toggle_name):
 
 @app.route('/registration-settings', methods=['GET'])
 def get_registration_settings():
-    toggle = get_feature_toggle('registration_code_enabled')
-    enabled = toggle.toggle_enabled if toggle else True
-    return jsonify({'registration_code_enabled': enabled}), 200
+    try:
+        toggle = get_feature_toggle('registration_code_enabled')
+        enabled = toggle.toggle_enabled if toggle else True
+        return jsonify({'registration_code_enabled': enabled}), 200
+    except Exception as e:
+        logging.error(f"Error in get_registration_settings: {e}")
+        return jsonify({"error": "Failed to fetch registration settings"}), 500
 
 
 @app.route('/registration-settings', methods=['POST'])
 def update_registration_settings():
-    data = request.get_json()
-    if data is None or 'registration_code_enabled' not in data:
-        return jsonify({'error': 'registration_code_enabled field is required'}), 400
+    try:
+        data = request.get_json()
+        if data is None or 'registration_code_enabled' not in data:
+            return jsonify({'error': 'registration_code_enabled field is required'}), 400
 
-    new_value = bool(data['registration_code_enabled'])
-    toggle = get_feature_toggle('registration_code_enabled')
-    if toggle:
-        toggle.toggle_enabled = new_value
-    else:
-        toggle = FeatureToggle(toggle_name='registration_code_enabled', toggle_enabled=new_value)
-        db.session.add(toggle)
-    db.session.commit()
-    return jsonify({'registration_code_enabled': new_value}), 200
+        new_value = bool(data['registration_code_enabled'])
+        toggle = get_feature_toggle('registration_code_enabled')
+        if toggle:
+            toggle.toggle_enabled = new_value
+        else:
+            toggle = FeatureToggle(toggle_name='registration_code_enabled', toggle_enabled=new_value)
+            db.session.add(toggle)
+        db.session.commit()
+        return jsonify({'registration_code_enabled': new_value}), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error in update_registration_settings: {e}")
+        return jsonify({"error": "Failed to update registration settings"}), 500
 
 
 @app.route('/adhik-maas-settings', methods=['GET'])
 def get_adhik_maas_settings():
-    edit_toggle      = get_feature_toggle('allow_adhik_maas_edit')
-    finalized_toggle = get_feature_toggle('adhik_maas_2026_list_finalized')
-    daura_toggle     = get_feature_toggle('show_adhik_maas_daura')
-    return jsonify({
-        'allow_adhik_maas_edit':          edit_toggle.toggle_enabled      if edit_toggle      else False,
-        'adhik_maas_2026_list_finalized': finalized_toggle.toggle_enabled if finalized_toggle else False,
-        'show_adhik_maas_daura':          daura_toggle.toggle_enabled     if daura_toggle     else True,
-    }), 200
+    try:
+        edit_toggle      = get_feature_toggle('allow_adhik_maas_edit')
+        finalized_toggle = get_feature_toggle('adhik_maas_2026_list_finalized')
+        daura_toggle     = get_feature_toggle('show_adhik_maas_daura')
+        return jsonify({
+            'allow_adhik_maas_edit':          edit_toggle.toggle_enabled      if edit_toggle      else False,
+            'adhik_maas_2026_list_finalized': finalized_toggle.toggle_enabled if finalized_toggle else False,
+            'show_adhik_maas_daura':          daura_toggle.toggle_enabled     if daura_toggle     else True,
+        }), 200
+    except Exception as e:
+        logging.error(f"Error in get_adhik_maas_settings: {e}")
+        return jsonify({"error": "Failed to fetch Adhik Maas settings"}), 500
 
 
 @app.route('/adhik-maas-settings', methods=['POST'])
 def update_adhik_maas_settings():
-    data = request.get_json()
-    if data is None:
-        return jsonify({'error': 'Request body is required'}), 400
+    try:
+        data = request.get_json()
+        if data is None:
+            return jsonify({'error': 'Request body is required'}), 400
 
-    _ADHIK_MAAS_TOGGLES = {
-        'allow_adhik_maas_edit',
-        'adhik_maas_2026_list_finalized',
-    }
-    updated = {}
-    for key in _ADHIK_MAAS_TOGGLES:
-        if key in data:
-            new_value = bool(data[key])
-            toggle = get_feature_toggle(key)
-            if toggle:
-                toggle.toggle_enabled = new_value
-            else:
-                db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=new_value))
-            updated[key] = new_value
+        _ADHIK_MAAS_TOGGLES = {
+            'allow_adhik_maas_edit',
+            'adhik_maas_2026_list_finalized',
+        }
+        updated = {}
+        for key in _ADHIK_MAAS_TOGGLES:
+            if key in data:
+                new_value = bool(data[key])
+                toggle = get_feature_toggle(key)
+                if toggle:
+                    toggle.toggle_enabled = new_value
+                else:
+                    db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=new_value))
+                updated[key] = new_value
 
-    if not updated:
-        return jsonify({'error': f'Provide at least one of: {sorted(_ADHIK_MAAS_TOGGLES)}'}), 400
+        if not updated:
+            return jsonify({'error': f'Provide at least one of: {sorted(_ADHIK_MAAS_TOGGLES)}'}), 400
 
-    db.session.commit()
-    return jsonify(updated), 200
+        db.session.commit()
+        return jsonify(updated), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error in update_adhik_maas_settings: {e}")
+        return jsonify({"error": "Failed to update Adhik Maas settings"}), 500
 
 
 _HOME_FLAGS = {
@@ -158,32 +175,41 @@ _HOME_FLAGS = {
 
 @app.route('/home-settings', methods=['GET'])
 def get_home_settings():
-    result = {}
-    for key, default in _HOME_FLAGS.items():
-        t = get_feature_toggle(key)
-        result[key] = t.toggle_enabled if t else default
-    return jsonify(result), 200
+    try:
+        result = {}
+        for key, default in _HOME_FLAGS.items():
+            t = get_feature_toggle(key)
+            result[key] = t.toggle_enabled if t else default
+        return jsonify(result), 200
+    except Exception as e:
+        logging.error(f"Error in get_home_settings: {e}")
+        return jsonify({"error": "Failed to fetch home settings"}), 500
 
 
 @app.route('/home-settings', methods=['POST'])
 def update_home_settings():
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'JSON body required'}), 400
-    updated = {}
-    for key in _HOME_FLAGS:
-        if key in data:
-            value = bool(data[key])
-            toggle = get_feature_toggle(key)
-            if toggle:
-                toggle.toggle_enabled = value
-            else:
-                db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=value))
-            updated[key] = value
-    if not updated:
-        return jsonify({'error': 'No valid keys provided'}), 400
-    db.session.commit()
-    return jsonify(updated), 200
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+        updated = {}
+        for key in _HOME_FLAGS:
+            if key in data:
+                value = bool(data[key])
+                toggle = get_feature_toggle(key)
+                if toggle:
+                    toggle.toggle_enabled = value
+                else:
+                    db.session.add(FeatureToggle(toggle_name=key, toggle_enabled=value))
+                updated[key] = value
+        if not updated:
+            return jsonify({'error': 'No valid keys provided'}), 400
+        db.session.commit()
+        return jsonify(updated), 200
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error in update_home_settings: {e}")
+        return jsonify({"error": "Failed to update home settings"}), 500
 
 
 # Function to fetch the feature toggle
@@ -192,15 +218,19 @@ def get_reference_data():
     """
     Fetches the reference data.
     """
-    reference_data = ReferenceData.query.all()
-    data = []
-    for record in reference_data:
-        data.append({
-            'id': record.id,
-            'reference_key': record.reference_key,
-            'reference_value': record.reference_value
-        })
-    return jsonify(data)
+    try:
+        reference_data = ReferenceData.query.all()
+        data = []
+        for record in reference_data:
+            data.append({
+                'id': record.id,
+                'reference_key': record.reference_key,
+                'reference_value': record.reference_value
+            })
+        return jsonify(data), 200
+    except Exception as e:
+        logging.error(f"Error in get_reference_data: {e}")
+        return jsonify({"error": "Failed to fetch reference data"}), 500
 
 # Function to fetch the feature toggle
 @app.route('/verify-reset', methods=['POST'])
@@ -301,9 +331,13 @@ def change_password():
         }), 200
 
     except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Database error: {str(db_err)}")
         return jsonify({"error": "Database error occurred"}), 500
     except Exception as e:
+        if conn:
+            conn.rollback()
         logging.error(f"Error in change_password: {str(e)}")
         return jsonify({"error": "Unexpected error occurred"}), 500
     finally:
@@ -595,59 +629,48 @@ def book():
     """
     Handles booking requests.
     """
-    # Fetch the feature toggle settings for 'enable_booking'
-    feature_toggle = get_feature_toggle('enable_booking')
-
-    # If feature toggle is not found or the booking feature is disabled
-    if not feature_toggle or not feature_toggle.toggle_enabled:  # Fixed attribute name
-        return jsonify({"error": "Upasana booking is not available right now!"}), 400
-
-    # Get the data from the request
-    data = request.get_json()
-    user_id = data.get('user_id')
-    mahaprasad = data.get('mahaprasad', False)
-    booking_date_str = data.get('booking_date')
-
-    # Ensure booking_date_str is present
-    if not booking_date_str:
-        return jsonify({"error": "Booking date is required."}), 400
-
-    # Convert booking_date from string to date object
     try:
-        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+        feature_toggle = get_feature_toggle('enable_booking')
+        if not feature_toggle or not feature_toggle.toggle_enabled:
+            return jsonify({"error": "Upasana booking is not available right now!"}), 400
 
-    # --- New Validation Logic Starts Here ---
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
 
-    # Fetch the allowed booking year from reference data
-    allowed_booking_year_str = get_reference_value('booking_year')
-    
-    if not allowed_booking_year_str:
-        # Handle case where booking_year is not configured in reference data
-        return jsonify({"error": "Booking year configuration is missing."}), 500
+        user_id          = data.get('user_id')
+        mahaprasad       = data.get('mahaprasad', False)
+        booking_date_str = data.get('booking_date')
 
-    try:
-        # Convert the allowed year string to an integer
-        allowed_booking_year = int(allowed_booking_year_str)
-    except ValueError:
-        # Handle case where the stored reference value is not a valid integer year
-        return jsonify({"error": "Invalid booking year configuration format."}), 500
+        if not booking_date_str:
+            return jsonify({"error": "Booking date is required."}), 400
 
-    # Validate that the selected booking_date is within the allowed year
-    if booking_date.year != allowed_booking_year:
-        return jsonify({
-            "error": f"Bookings are only allowed for the year {allowed_booking_year}."
-        }), 400
+        try:
+            booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-    # --- New Validation Logic Ends Here ---
+        allowed_booking_year_str = get_reference_value('booking_year')
+        if not allowed_booking_year_str:
+            return jsonify({"error": "Booking year configuration is missing."}), 500
 
-    # Check if zone restrictions are enabled
-    zone_restriction_toggle = get_feature_toggle('enable_zone_restriction')
-    enable_zone_restriction = zone_restriction_toggle.toggle_enabled if zone_restriction_toggle else False
+        try:
+            allowed_booking_year = int(allowed_booking_year_str)
+        except ValueError:
+            return jsonify({"error": "Invalid booking year configuration format."}), 500
 
-    # Call the create_booking function
-    return create_booking(user_id, booking_date, mahaprasad, enable_zone_restriction)
+        if booking_date.year != allowed_booking_year:
+            return jsonify({
+                "error": f"Bookings are only allowed for the year {allowed_booking_year}."
+            }), 400
+
+        zone_restriction_toggle = get_feature_toggle('enable_zone_restriction')
+        enable_zone_restriction = zone_restriction_toggle.toggle_enabled if zone_restriction_toggle else False
+
+        return create_booking(user_id, booking_date, mahaprasad, enable_zone_restriction)
+    except Exception as e:
+        logging.exception(f"Unexpected error in book: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
 
 # Get All Bookings for Admin 
 @app.route('/bookings', methods=['GET'])
@@ -681,31 +704,31 @@ def sunday_book():
     Handles Sunday booking requests.
     Sunday booking is allowed only when all Saturday slots are full for the year.
     """
-    # Fetch the feature toggle settings for 'enable_booking'
-    feature_toggle = get_feature_toggle('enable_booking')
-
-    # If feature toggle is not found or the booking feature is disabled
-    if not feature_toggle or not feature_toggle.toggle_enabled:
-        return jsonify({"error": "Upasana booking is not available right now!"}), 400
-
-    # Get the data from the request
-    data = request.get_json()
-    user_id = data.get('user_id')
-    mahaprasad = data.get('mahaprasad', False)
-    booking_date_str = data.get('booking_date')
-
-    # Ensure booking_date_str is present
-    if not booking_date_str:
-        return jsonify({"error": "Booking date is required."}), 400
-
-    # Convert booking_date from string to date object
     try:
-        booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+        feature_toggle = get_feature_toggle('enable_booking')
+        if not feature_toggle or not feature_toggle.toggle_enabled:
+            return jsonify({"error": "Upasana booking is not available right now!"}), 400
 
-    # Call the Sunday booking function
-    return create_sunday_booking(user_id, booking_date, mahaprasad)
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+
+        user_id          = data.get('user_id')
+        mahaprasad       = data.get('mahaprasad', False)
+        booking_date_str = data.get('booking_date')
+
+        if not booking_date_str:
+            return jsonify({"error": "Booking date is required."}), 400
+
+        try:
+            booking_date = datetime.strptime(booking_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+
+        return create_sunday_booking(user_id, booking_date, mahaprasad)
+    except Exception as e:
+        logging.exception(f"Unexpected error in sunday_book: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
 
 
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
@@ -1162,12 +1185,18 @@ def register_user():
         return jsonify({"message": "User registered successfully"}), 201
 
     except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Database error: {str(db_err)}")
         return jsonify({"error": "Database error occurred"}), 500
     except KeyError as key_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Missing key: {str(key_err)}")
         return jsonify({"error": f"Missing field: {str(key_err)}"}), 400
     except Exception as e:
+        if conn:
+            conn.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
@@ -1264,9 +1293,13 @@ def update_user(user_id):
         return jsonify({"message": "User updated successfully"}), 200
 
     except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Database error: {str(db_err)}")
         return jsonify({"error": "Database error occurred"}), 500
     except Exception as e:
+        if conn:
+            conn.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
@@ -1287,17 +1320,21 @@ def delete_user(user_id):
 
         # Execute the DELETE query
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        conn.commit()
 
         if cursor.rowcount == 0:
             return jsonify({"error": "User not found"}), 404
 
+        conn.commit()
         return jsonify({"message": "User deleted successfully"}), 200
 
     except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Database error: {str(db_err)}")
         return jsonify({"error": "Database error occurred"}), 500
     except Exception as e:
+        if conn:
+            conn.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
@@ -1368,27 +1405,26 @@ def get_user_by_id(user_id):
 # Example route to get bookings with user details
 @app.route('/bookings-with-users', methods=['GET'])
 def get_bookings_with_users():
-    # Perform the join query between Booking and User tables
-    results = (
-        db.session.query(Booking, User)
-        .join(User, User.id == Booking.user_id)
-        .all()
-    )
-    
-    # Format the data for JSON response
-    bookings_with_users = [
-        {
-            "booking_date": booking.booking_date,
-            "zone": booking.zone,
-           
-            "user_first_name": user.first_name,
-            "user_last_name": user.last_name,
-            "user_member_id": user.id
-        }
-        for booking, user in results
-    ]
-    
-    return jsonify(bookings_with_users)
+    try:
+        results = (
+            db.session.query(Booking, User)
+            .join(User, User.id == Booking.user_id)
+            .all()
+        )
+        bookings_with_users = [
+            {
+                "booking_date": booking.booking_date,
+                "zone": booking.zone,
+                "user_first_name": user.first_name,
+                "user_last_name": user.last_name,
+                "user_member_id": user.id
+            }
+            for booking, user in results
+        ]
+        return jsonify(bookings_with_users), 200
+    except Exception as e:
+        logging.error(f"Error in get_bookings_with_users: {e}")
+        return jsonify({"error": "Failed to fetch bookings with users"}), 500
 
 # User login route
 @app.route('/login', methods=['POST'])
@@ -1461,17 +1497,19 @@ def upasanaUsersSummary():
             "total_anugrahit_users": total_anugrahit_users
         }), 200
     except Exception as e:
-        print(f"[upasanaUsersSummary] ERROR: {e}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error in upasanaUsersSummary: {e}")
+        return jsonify({"error": "Failed to fetch summary"}), 500
 
 # Get Booking dates for booking date must be gray
 @app.route('/bookingsDates', methods=['GET'])
 def get_all_booked_dates():
-    booked_dates = Booking.query.with_entities(Booking.booking_date).filter(Booking.is_active == True).all()
-    # Return dates in ISO format
-    dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
-    print("Booked Dates are:", dates)
-    return jsonify({"booked_dates": dates}), 200
+    try:
+        booked_dates = Booking.query.with_entities(Booking.booking_date).filter(Booking.is_active == True).all()
+        dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
+        return jsonify({"booked_dates": dates}), 200
+    except Exception as e:
+        logging.error(f"Error in get_all_booked_dates: {e}")
+        return jsonify({"error": "Failed to fetch booked dates"}), 500
 
 @app.route('/update_booking', methods=['POST'])
 def update_booking():
@@ -1507,26 +1545,29 @@ def update_booking():
             "UPDATE bookings SET is_active = %s, updated_date = NOW() WHERE id = %s",
             (is_active, booking_id)
         )
-        conn.commit()
 
-        # -----------------------------------------------
-        # 🧹 REMOVE LOCK IF BOOKING IS CANCELLED
-        # -----------------------------------------------
+        # Remove booking lock atomically in the same transaction so the two
+        # writes either both succeed or both roll back together.
         if is_active is False:
             cursor.execute(
                 "DELETE FROM booking_locks WHERE booking_date = %s",
                 (booking_date,)
             )
-            conn.commit()
-            print(f"🧹 Lock removed for {booking_date}")
+            logging.info(f"Lock queued for removal for {booking_date}")
+
+        conn.commit()
 
         status = "activated" if is_active else "cancelled"
         return jsonify({"message": f"Booking {status} successfully"}), 200
 
     except psycopg2.DatabaseError as db_err:
+        if conn:
+            conn.rollback()
         logging.error(f"Database error: {str(db_err)}")
         return jsonify({"error": "Database error occurred"}), 500
     except Exception as e:
+        if conn:
+            conn.rollback()
         logging.error(f"Error: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
     finally:
