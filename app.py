@@ -1215,8 +1215,16 @@ def get_all_users():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Step 3: Fetch all users from the users table
-        cursor.execute("SELECT * FROM users")
+        # Explicit columns — avoids wrong mobile_number / names if SELECT * order differs
+        # (e.g. confirm_password, latitude, or other columns added in different positions).
+        cursor.execute(
+            """
+            SELECT id, first_name, middle_name, last_name, email,
+                   mobile_number, alternate_mobile_number, flat_no, full_address,
+                   area, landmark, city, state, pincode, anugrahit, gender, unique_family_code
+            FROM users
+            """
+        )
         users = cursor.fetchall()
 
         # Step 4: Convert the data into a list of dictionaries for better JSON readability
@@ -1228,18 +1236,18 @@ def get_all_users():
                 'middle_name': user[2],
                 'last_name': user[3],
                 'email': user[4],
-                'mobile_number': user[7],
-                'alternate_mobile_number': user[8],
-                'flat_no': user[9],
-                'full_address': user[10],
-                'area': user[11],
-                'landmark': user[12],
-                'city': user[13],
-                'state': user[14],
-                'pincode': user[15],
-                'anugrahit': user[16],
-                'gender': user[17],
-                'unique_family_code': user[18],
+                'mobile_number': user[5],
+                'alternate_mobile_number': user[6],
+                'flat_no': user[7],
+                'full_address': user[8],
+                'area': user[9],
+                'landmark': user[10],
+                'city': user[11],
+                'state': user[12],
+                'pincode': user[13],
+                'anugrahit': user[14],
+                'gender': user[15],
+                'unique_family_code': user[16],
             }
             user_list.append(user_data)
 
