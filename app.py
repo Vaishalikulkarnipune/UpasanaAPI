@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify
 import psycopg2
-from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission,AdhikMaasArea
-from Booking import create_booking
+from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission,AdhikMaasArea,BlockedDate
+from Booking import create_booking, reactivate_booking
 from datetime import datetime
+from sqlalchemy import text
 from config import get_db_connection, release_db_connection,Config
 from werkzeug.security import generate_password_hash, check_password_hash
 import re
@@ -11,6 +12,8 @@ import logging
 from janmotsav import router as janmotsav_bp
 from sunday_booking import create_sunday_booking
 from adhik_maas import router as adhik_maas_bp
+from blocked_dates import router as blocked_dates_bp
+from upasana_settings import router as upasana_settings_bp, get_booking_settings
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +25,33 @@ app.config.from_object(Config)
 app.register_blueprint(janmotsav_bp)
 # Register Adhik Maas Daura Seva (local JSON until DB)
 app.register_blueprint(adhik_maas_bp)
+app.register_blueprint(blocked_dates_bp)
+app.register_blueprint(upasana_settings_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
+
+# Database-level backstops for the booking rules. Scoped to 2027+ so older
+# data (e.g. admin placeholder bookings) doesn't block index creation.
+_BOOKING_INDEXES = [
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_bookings_active_date_2027
+       ON bookings (booking_date)
+       WHERE is_active AND booking_date >= DATE '2027-01-01'""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_bookings_active_user_year_2027
+       ON bookings (user_id, (EXTRACT(YEAR FROM booking_date)))
+       WHERE is_active AND booking_date >= DATE '2027-01-01'""",
+]
+
+with app.app_context():
+    try:
+        BlockedDate.__table__.create(bind=db.engine, checkfirst=True)
+    except Exception as e:
+        logging.warning(f"Could not ensure blocked_dates table exists: {e}")
+    for ddl in _BOOKING_INDEXES:
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(ddl))
+        except Exception as e:
+            logging.warning(f"Could not ensure booking index exists: {e}")
 # Configure logging to ensure all logs are captured
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -630,8 +658,8 @@ def book():
     Handles booking requests.
     """
     try:
-        feature_toggle = get_feature_toggle('enable_booking')
-        if not feature_toggle or not feature_toggle.toggle_enabled:
+        settings = get_booking_settings()
+        if not settings["enable_booking"]:
             return jsonify({"error": "Upasana booking is not available right now!"}), 400
 
         data = request.get_json()
@@ -650,24 +678,16 @@ def book():
         except ValueError:
             return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
-        allowed_booking_year_str = get_reference_value('booking_year')
-        if not allowed_booking_year_str:
+        allowed_booking_year = settings["booking_year"]
+        if not allowed_booking_year:
             return jsonify({"error": "Booking year configuration is missing."}), 500
-
-        try:
-            allowed_booking_year = int(allowed_booking_year_str)
-        except ValueError:
-            return jsonify({"error": "Invalid booking year configuration format."}), 500
 
         if booking_date.year != allowed_booking_year:
             return jsonify({
                 "error": f"Bookings are only allowed for the year {allowed_booking_year}."
             }), 400
 
-        zone_restriction_toggle = get_feature_toggle('enable_zone_restriction')
-        enable_zone_restriction = zone_restriction_toggle.toggle_enabled if zone_restriction_toggle else False
-
-        return create_booking(user_id, booking_date, mahaprasad, enable_zone_restriction)
+        return create_booking(user_id, booking_date, mahaprasad, settings["enable_zone_restriction"])
     except Exception as e:
         logging.exception(f"Unexpected error in book: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
@@ -1206,6 +1226,40 @@ def register_user():
         if conn is not None:
             release_db_connection(conn)
 
+# Distinct zones from master `zone` table (for admin Members filter labels)
+@app.route('/zones', methods=['GET'])
+def get_zones():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT zone_code, MIN(area_name) AS area_name
+            FROM zone
+            GROUP BY zone_code
+            ORDER BY zone_code
+            """
+        )
+        rows = cursor.fetchall()
+        return jsonify([
+            {"zone_code": row[0], "area_name": row[1] or ""}
+            for row in rows
+        ]), 200
+    except psycopg2.DatabaseError as db_err:
+        logging.error(f"Database error in get_zones: {str(db_err)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    except Exception as e:
+        logging.error(f"Error in get_zones: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            release_db_connection(conn)
+
+
 # Step 2: API route for fetching all users
 @app.route('/users', methods=['GET'])
 def get_all_users():
@@ -1221,7 +1275,8 @@ def get_all_users():
             """
             SELECT id, first_name, middle_name, last_name, email,
                    mobile_number, alternate_mobile_number, flat_no, full_address,
-                   area, landmark, city, state, pincode, anugrahit, gender, unique_family_code
+                   area, landmark, city, state, pincode, anugrahit, gender, unique_family_code,
+                   zone_code
             FROM users
             """
         )
@@ -1248,6 +1303,7 @@ def get_all_users():
                 'anugrahit': user[14],
                 'gender': user[15],
                 'unique_family_code': user[16],
+                'zone_code': user[17] or '',
             }
             user_list.append(user_data)
 
@@ -1514,7 +1570,11 @@ def get_all_booked_dates():
     try:
         booked_dates = Booking.query.with_entities(Booking.booking_date).filter(Booking.is_active == True).all()
         dates = [date.booking_date.strftime("%Y-%m-%d") for date in booked_dates]
-        return jsonify({"booked_dates": dates}), 200
+        blocked = [
+            {"date": b.blocked_date.strftime("%Y-%m-%d"), "reason": b.reason or ""}
+            for b in BlockedDate.query.order_by(BlockedDate.blocked_date).all()
+        ]
+        return jsonify({"booked_dates": dates, "blocked_dates": blocked}), 200
     except Exception as e:
         logging.error(f"Error in get_all_booked_dates: {e}")
         return jsonify({"error": "Failed to fetch booked dates"}), 500
@@ -1532,6 +1592,11 @@ def update_booking():
         # Validate the input
         if not user_id or not booking_id or is_active is None:
             return jsonify({"error": "User ID, Booking ID, and is_active status are required"}), 400
+
+        if is_active is True:
+            return reactivate_booking(
+                booking_id, user_id, get_booking_settings()["enable_zone_restriction"]
+            )
 
         conn = get_db_connection()
         cursor = conn.cursor()

@@ -165,6 +165,22 @@ class BookingLock(db.Model):
 
 
 # ============================================================
+# BLOCKED DATES (admin-closed Upasana dates)
+# ============================================================
+class BlockedDate(db.Model):
+    __tablename__ = "blocked_dates"
+
+    id = Column(Integer, primary_key=True)
+    blocked_date = Column(Date, unique=True, nullable=False)
+    reason = Column(String(255))
+    created_by = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BlockedDate {self.blocked_date}>"
+
+
+# ============================================================
 # JANMOTSAV YEAR
 # ============================================================
 class JanmotsavYear(db.Model):

@@ -1,296 +1,309 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from flask import jsonify
-from model import db, Booking, User, BookingLock
-from sqlalchemy import func
+from model import db, Booking, User, BlockedDate, SundayBooking
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 import calendar
-import traceback
+import logging
+
+
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+ZONE_LIMITS = {"A": 1, "B": 2, "C": 2}
+ZONE_NAMES = {
+    "A": "Zone A (East Pune)",
+    "B": "Zone B (Rest of Pune)",
+    "C": "Zone C (PCMC)",
+}
+
+# Namespaces for pg_advisory_xact_lock(int, int)
+USER_LOCK_NS = 1001
+MONTH_LOCK_NS = 1002
+
+SLOT_TAKEN_MSG = "This Saturday is no longer available. Please select another date."
+
+
+def today_ist():
+    return (datetime.utcnow() + IST_OFFSET).date()
+
+
+def month_bounds(year, month):
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, last_day)
+
+
+def saturdays_in_month(year, month):
+    return [
+        date(year, month, week[calendar.SATURDAY])
+        for week in calendar.monthcalendar(year, month)
+        if week[calendar.SATURDAY] != 0
+    ]
 
 
 # =======================================================
-# 🧩 Helper Function to Count Saturdays in a Month
+# 🔒 Locks (released automatically on commit / rollback)
 # =======================================================
-def count_saturdays_in_month(date):
-    year = date.year
-    month = date.month
-    month_days = calendar.monthcalendar(year, month)
-    saturdays = sum(1 for week in month_days if week[calendar.SATURDAY] != 0)
-    return saturdays
+def lock_month(year, month):
+    db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+        {"ns": MONTH_LOCK_NS, "key": year * 100 + month},
+    )
+
+
+def lock_user_and_month(user_id, booking_date):
+    """Always user first, then month, so concurrent requests can't deadlock."""
+    db.session.execute(text("SET LOCAL lock_timeout = '15s'"))
+    db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+        {"ns": USER_LOCK_NS, "key": int(user_id)},
+    )
+    lock_month(booking_date.year, booking_date.month)
 
 
 # =======================================================
-# 🧩 Helper Function to Get All Saturdays from Dec 1
+# 🧩 Monthly counters
 # =======================================================
-def get_saturdays_for_year():
-    start_date = datetime(datetime.now().year, 12, 1)
-    saturdays = []
-    for i in range(365):
-        date = start_date + timedelta(days=i)
-        if date.weekday() == 5:
-            saturdays.append(date.date())
-    return saturdays
+def monthly_zone_counts(year, month):
+    start, end = month_bounds(year, month)
+    rows = (
+        db.session.query(User.zone_code, func.count(Booking.id))
+        .join(User, User.id == Booking.user_id)
+        .filter(Booking.booking_date >= start, Booking.booking_date <= end, Booking.is_active == True)
+        .group_by(User.zone_code)
+        .all()
+    )
+    return {zone: count for zone, count in rows}
+
+
+def open_saturdays_in_month(year, month):
+    """Saturdays still bookable: not in the past, not blocked, not already booked."""
+    today = today_ist()
+    candidates = [d for d in saturdays_in_month(year, month) if d >= today]
+    if not candidates:
+        return 0
+    blocked = {
+        b.blocked_date
+        for b in BlockedDate.query.filter(BlockedDate.blocked_date.in_(candidates)).all()
+    }
+    booked = {
+        b.booking_date
+        for b in Booking.query.filter(Booking.booking_date.in_(candidates), Booking.is_active == True).all()
+    }
+    return sum(1 for d in candidates if d not in blocked and d not in booked)
+
+
+def zone_rule_error(zone_code, year, month):
+    """Monthly zone allocation check. Returns an error message or None."""
+    if zone_code not in ZONE_LIMITS:
+        return "Your zone is not set up for Upasana booking. Please contact the admin to update your pincode/zone."
+
+    counts = monthly_zone_counts(year, month)
+    zone_name = ZONE_NAMES[zone_code]
+    full_msg = f"{zone_name} is full for this month. Please try another month."
+
+    if counts.get(zone_code, 0) >= ZONE_LIMITS[zone_code]:
+        return full_msg
+
+    # The last open Saturday of a month is held for Zone A until Zone A has its booking
+    if zone_code != "A" and counts.get("A", 0) == 0 and open_saturdays_in_month(year, month) <= 1:
+        return full_msg
+
+    return None
+
+
+def active_booking_in_year(user_id, year):
+    start, end = date(year, 1, 1), date(year, 12, 31)
+    saturday = Booking.query.filter(
+        Booking.user_id == user_id,
+        Booking.booking_date >= start,
+        Booking.booking_date <= end,
+        Booking.is_active == True,
+    ).first()
+    if saturday:
+        return saturday.booking_date
+    sunday = SundayBooking.query.filter(
+        SundayBooking.user_id == user_id,
+        SundayBooking.booking_date >= start,
+        SundayBooking.booking_date <= end,
+        SundayBooking.is_active == True,
+    ).first()
+    return sunday.booking_date if sunday else None
+
+
+def check_booking_rules(user, booking_date, enable_zone_restriction):
+    """
+    Every rule a booking must pass. Call while holding lock_user_and_month().
+    Returns (message, status_code) when not allowed, else None.
+    """
+    blocked = BlockedDate.query.filter_by(blocked_date=booking_date).first()
+    if blocked:
+        message = "This Saturday is not available for Upasana booking."
+        if blocked.reason:
+            message = f"{message} ({blocked.reason})"
+        return message, 400
+
+    taken = Booking.query.filter(
+        Booking.booking_date == booking_date, Booking.is_active == True
+    ).first()
+    if taken:
+        return SLOT_TAKEN_MSG, 409
+
+    if active_booking_in_year(user.id, booking_date.year):
+        return "You have already made one booking for this year.", 400
+
+    if enable_zone_restriction:
+        error = zone_rule_error(user.zone_code, booking_date.year, booking_date.month)
+        if error:
+            return error, 400
+
+    return None
+
+
+def _parse_date(booking_date):
+    if isinstance(booking_date, date) and not isinstance(booking_date, datetime):
+        return booking_date
+    if isinstance(booking_date, datetime):
+        return booking_date.date()
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(booking_date, fmt).date()
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 # =======================================================
 # 🧱 Main Booking Function
 # =======================================================
 def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restriction=True):
-    """Creates a booking safely with all business rules and race condition protection."""
+    """Creates a booking after validating every rule while holding the user and month locks."""
+    booking_date = _parse_date(booking_date)
+    if not booking_date:
+        return jsonify({"error": "Invalid date format. Use 'YYYY-MM-DD'."}), 400
 
-    # Helper to remove lock when needed
-    def remove_lock(date):
-        try:
-            BookingLock.query.filter_by(booking_date=date).delete()
-            db.session.commit()
-            print(f"🧹 Lock removed for {date}")
-        except Exception as ex:
-            db.session.rollback()
-            print(f"⚠️ Failed to remove lock for {date}: {ex}")
-
-    # --- Parse booking_date safely ---
-    if isinstance(booking_date, str):
-        try:
-            booking_date = datetime.strptime(booking_date, "%Y-%m-%dT%H:%M:%S").date()
-        except ValueError:
-            try:
-                booking_date = datetime.strptime(booking_date, "%Y-%m-%d").date()
-            except ValueError:
-                print("DEBUG: RETURN_REASON=INVALID_DATE_FORMAT", booking_date)
-                return jsonify({"error": "Invalid date format. Use 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'."}), 400
-
-    # --- Only allow bookings on Saturdays ---
     if booking_date.weekday() != 5:
-        print("DEBUG: RETURN_REASON=NOT_SATURDAY", booking_date.weekday())
         return jsonify({"error": "You can only book on Saturdays."}), 400
 
-    # --- Fetch user and zone ---
-    user = User.query.filter_by(id=user_id).first()
-    if not user:
-        print(f"DEBUG: RETURN_REASON=USER_NOT_FOUND user_id={user_id}")
+    if booking_date < today_ist():
+        return jsonify({"error": "Past dates cannot be booked."}), 400
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
         return jsonify({"error": "User not found."}), 404
 
-    zone_code = user.zone_code or "Unknown"
-    print(f"✅ User {user_id} (Zone {zone_code}) booking for {booking_date}")
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
 
-    # =========================================================
-    # 🔥 OPTION A: Prevent rebooking of a cancelled date (immediate)
-    # =========================================================
-    cancelled_booking = Booking.query.filter_by(
-        user_id=user_id,
-        booking_date=booking_date,
-        is_active=False
-    ).first()
+    if user.is_quick_registered:
+        return jsonify({"error": "Please complete your profile before booking Upasana."}), 400
 
-    if cancelled_booking:
-        print(f"DEBUG: RETURN_REASON=CANCELLED_DATE_REBOOK_ATTEMPT booking_id={cancelled_booking.id} user_id={user_id} date={booking_date}")
+    # A cancelled date can't be rebooked by the same user (unique user_id + booking_date)
+    cancelled = Booking.query.filter_by(user_id=user_id, booking_date=booking_date, is_active=False).first()
+    if cancelled:
         return jsonify({"error": "Cancelled dates cannot be rebooked."}), 400
-    # =========================================================
 
-    # --- Restrict one booking per user per year ---
-    year_start = datetime(booking_date.year, 1, 1).date()
-    year_end = datetime(booking_date.year, 12, 31).date()
-    existing_booking = Booking.query.filter(
-        Booking.user_id == user_id,
-        Booking.booking_date >= year_start,
-        Booking.booking_date <= year_end,
-        Booking.is_active == True
-    ).first()
-
-    if existing_booking:
-        print(f"DEBUG: RETURN_REASON=ONE_BOOKING_PER_YEAR user_id={user_id} existing_booking_id={existing_booking.id}")
-        return jsonify({"error": "You have already made one booking for this year."}), 400
-
-    # =======================================================
-    # DIAGNOSTIC: state before trying to create lock
-    # =======================================================
     try:
-        existing_lock_pre = BookingLock.query.filter_by(booking_date=booking_date).first()
-        total_active_bookings_pre = Booking.query.filter(Booking.booking_date == booking_date, Booking.is_active == True).count()
-        print(f"DEBUG: PRE_LOCK existing_lock={bool(existing_lock_pre)} total_active_bookings={total_active_bookings_pre}")
-    except Exception as ex:
-        print(f"DEBUG: PRE_LOCK query failed: {ex}")
+        lock_user_and_month(user_id, booking_date)
 
-    # =======================================================
-    # 🔒 Race Condition Prevention: Soft Lock (BookingLock)
-    # =======================================================
-    try:
-        lock = BookingLock(booking_date=booking_date)
-        db.session.add(lock)
+        rule_error = check_booking_rules(user, booking_date, enable_zone_restriction)
+        if rule_error:
+            db.session.rollback()
+            message, status = rule_error
+            logging.info(f"Booking rejected user={user_id} date={booking_date}: {message}")
+            return jsonify({"error": message}), status
+
+        now = datetime.utcnow()
+        db.session.add(Booking(
+            user_id=user_id,
+            booking_date=booking_date,
+            mahaprasad=bool(mahaprasad),
+            created_at=now,
+            updated_date=now,
+            updated_by=user_id,
+            is_active=True,
+        ))
         db.session.commit()
-        print(f"🔒 Lock acquired for {booking_date}")
-    except IntegrityError:
-        db.session.rollback()
-        print(f"DEBUG: RETURN_REASON=LOCK_EXISTS booking_date={booking_date}")
-        return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
-
-    # =======================================================
-    # 🔍 Monthly Zone Restrictions (compute diagnostic values)
-    # =======================================================
-    month_start = booking_date.replace(day=1)
-    next_month = booking_date.replace(day=28) + timedelta(days=4)
-    month_end = next_month.replace(day=1) - timedelta(days=1)
-
-    monthly_booking_count = Booking.query.filter(
-        Booking.user_id == user_id,
-        Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end,
-        Booking.is_active == True
-    ).count()
-
-    all_monthly_booking_count = Booking.query.filter(
-        Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end,
-        Booking.is_active == True
-    ).count()
-
-    zone_a_booking_count = Booking.query.join(User).filter(
-        User.zone_code == "A",
-        Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end,
-        Booking.is_active == True
-    ).count()
-
-    zone_b_booking_count = Booking.query.join(User).filter(
-        User.zone_code == "B",
-        Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end,
-        Booking.is_active == True
-    ).count()
-
-    zone_c_booking_count = Booking.query.join(User).filter(
-        User.zone_code == "C",
-        Booking.booking_date >= month_start,
-        Booking.booking_date <= month_end,
-        Booking.is_active == True
-    ).count()
-
-    # Diagnostic print of relevant counters
-    print(f"DEBUG: COUNTERS month_start={month_start} month_end={month_end} monthly_booking_count={monthly_booking_count} all_monthly_booking_count={all_monthly_booking_count} zoneA={zone_a_booking_count} zoneB={zone_b_booking_count} zoneC={zone_c_booking_count}")
-
-    # --- Apply Zone Restriction Rules ---
-    if enable_zone_restriction:
-        if zone_code == "A":
-            if monthly_booking_count >= 1:
-                print(f"DEBUG: RETURN_REASON=ZONE_A_MONTHLY_LIMIT user_id={user_id} monthly_booking_count={monthly_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Try another month, Zone A (East Pune) can only book once per month."}), 400
-            if zone_a_booking_count >= 1:
-                print(f"DEBUG: RETURN_REASON=ZONE_A_FULL month={month_start.month} zone_a_booking_count={zone_a_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Try another month, Zone A (East Pune) full for this month."}), 400
-
-        elif zone_code == "B":
-            if monthly_booking_count >= 2:
-                print(f"DEBUG: RETURN_REASON=ZONE_B_MONTHLY_LIMIT user_id={user_id} monthly_booking_count={monthly_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone B (Rest of Pune) limit reached for this month."}), 400
-            if zone_b_booking_count >= 2:
-                print(f"DEBUG: RETURN_REASON=ZONE_B_FULL zone_b_booking_count={zone_b_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone B (Rest of Pune) full for this month."}), 400
-
-            saturdays_count = count_saturdays_in_month(booking_date)
-            open_booking_in_month = saturdays_count - all_monthly_booking_count
-            print(f"DEBUG: ZONE_B saturdays_count={saturdays_count} open_booking_in_month={open_booking_in_month}")
-            if open_booking_in_month == 1 and zone_a_booking_count == 0:
-                print("DEBUG: RETURN_REASON=ZONE_B_OPEN_SLOTS_RESTRICTED")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone B (Rest of Pune) full for this month."}), 400
-
-        elif zone_code == "C":
-            if monthly_booking_count >= 2:
-                print(f"DEBUG: RETURN_REASON=ZONE_C_MONTHLY_LIMIT monthly_booking_count={monthly_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone C (PCMC) limit reached for this month."}), 400
-            if zone_c_booking_count >= 2:
-                print(f"DEBUG: RETURN_REASON=ZONE_C_FULL zone_c_booking_count={zone_c_booking_count}")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone C (PCMC) full for this month."}), 400
-
-            saturdays_count = count_saturdays_in_month(booking_date)
-            open_booking_in_month = saturdays_count - all_monthly_booking_count
-            print(f"DEBUG: ZONE_C saturdays_count={saturdays_count} open_booking_in_month={open_booking_in_month}")
-            if open_booking_in_month == 1 and zone_a_booking_count == 0:
-                print("DEBUG: RETURN_REASON=ZONE_C_OPEN_SLOTS_RESTRICTED")
-                remove_lock(booking_date)
-                return jsonify({"error": "Zone C (PCMC) full for this month."}), 400
-
-    # =======================================================
-    # 🧩 Prevent Double Booking by Same User or Same Date
-    # =======================================================
-    existing_booking_on_saturday = Booking.query.filter_by(
-        user_id=user_id, booking_date=booking_date, is_active=True
-    ).first()
-    if existing_booking_on_saturday:
-        print(f"DEBUG: RETURN_REASON=EXISTING_ACTIVE_BOOKING user_id={user_id} booking_id={existing_booking_on_saturday.id}")
-        remove_lock(booking_date)
-        return jsonify({"error": "Upasana already booked for this Saturday."}), 400
-
-    total_bookings_on_saturday = Booking.query.filter(
-        Booking.booking_date == booking_date, Booking.is_active == True
-    ).count()
-
-    print(f"DEBUG: total_bookings_on_saturday={total_bookings_on_saturday}")
-
-    if total_bookings_on_saturday > 0:
-        print(f"DEBUG: RETURN_REASON=TOTAL_BOOKINGS_GT_0 count={total_bookings_on_saturday}")
-        remove_lock(booking_date)
-        return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
-
-    # =======================================================
-    # 🧾 Create and Commit New Booking
-    # =======================================================
-    new_booking = Booking(
-        user_id=user_id,
-        booking_date=booking_date,
-        mahaprasad=mahaprasad,
-        created_at=datetime.utcnow(),
-        updated_date=datetime.utcnow(),
-        updated_by=user_id,
-        is_active=True
-    )
-
-    try:
-        db.session.add(new_booking)
-        db.session.commit()
-        print(f"✅ Booking successful: User {user_id} → {booking_date}")
-
-        return jsonify({
-            "message": "Booking successful.",
-            "booking_date": str(booking_date)
-        }), 201
+        logging.info(f"Booking successful user={user_id} date={booking_date}")
+        return jsonify({"message": "Booking successful.", "booking_date": str(booking_date)}), 201
 
     except IntegrityError as e:
         db.session.rollback()
-        print(f"DEBUG: EXCEPT_INTEGRITYERROR during commit: {e}")
-        remove_lock(booking_date)
-        return jsonify({"error": "Upasana is fully booked for this Saturday."}), 400
-
+        logging.warning(f"Booking integrity conflict user={user_id} date={booking_date}: {e}")
+        return jsonify({"error": SLOT_TAKEN_MSG}), 409
     except OperationalError as e:
         db.session.rollback()
-        print(f"DEBUG: EXCEPT_OPERATIONALERROR during commit: {e}")
-        remove_lock(booking_date)
-        return jsonify({"error": "Database temporarily busy. Please retry."}), 500
-
+        logging.warning(f"Booking operational error user={user_id} date={booking_date}: {e}")
+        return jsonify({"error": "Server is busy. Please retry in a moment."}), 503
     except Exception as e:
         db.session.rollback()
-        print(f"DEBUG: EXCEPT_GENERAL during commit: {e}")
-        remove_lock(booking_date)
-        return jsonify({"error": "Unexpected error during booking.", "details": str(e)}), 500
-
-    finally:
-        try:
-            existing = Booking.query.filter_by(
-                booking_date=booking_date, is_active=True
-            ).first()
-
-            if not existing:
-                print(f"DEBUG: FINALLY - no active booking found for {booking_date}, removing lock")
-                remove_lock(booking_date)
-            else:
-                print(f"DEBUG: FINALLY - active booking exists for {booking_date}, keeping lock")
-        except Exception as ex:
-            print(f"DEBUG: FINALLY cleanup failed: {ex}")
-            pass
+        logging.exception(f"Unexpected booking error user={user_id} date={booking_date}: {e}")
+        return jsonify({"error": "Unexpected error during booking."}), 500
 
 
+# =======================================================
+# ♻️ Reactivate a cancelled booking
+# =======================================================
+def reactivate_booking(booking_id, user_id, enable_zone_restriction=True):
+    """Re-validates every rule before turning a cancelled booking back on."""
+    booking = Booking.query.filter_by(id=booking_id, user_id=user_id).first()
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+    if booking.is_active:
+        return jsonify({"message": "Booking is already active."}), 200
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 404
+
+    try:
+        lock_user_and_month(user_id, booking.booking_date)
+
+        rule_error = check_booking_rules(user, booking.booking_date, enable_zone_restriction)
+        if rule_error:
+            db.session.rollback()
+            message, status = rule_error
+            return jsonify({"error": f"Cannot reactivate: {message}"}), status
+
+        booking.is_active = True
+        booking.updated_date = datetime.utcnow()
+        db.session.commit()
+        return jsonify({"message": "Booking activated successfully"}), 200
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": f"Cannot reactivate: {SLOT_TAKEN_MSG}"}), 409
+    except OperationalError:
+        db.session.rollback()
+        return jsonify({"error": "Server is busy. Please retry in a moment."}), 503
+    except Exception as e:
+        db.session.rollback()
+        logging.exception(f"Unexpected reactivation error booking={booking_id}: {e}")
+        return jsonify({"error": "Unexpected error while reactivating booking."}), 500
+
+
+# =======================================================
+# 📅 Per-month availability for the booking calendar
+# =======================================================
+def booking_availability(user, year, enable_zone_restriction=True):
+    """Read-only preview of which months the user can book in (final check happens at booking)."""
+    existing = active_booking_in_year(user.id, year)
+    today = today_ist()
+    months = {}
+    for month in range(1, 13):
+        _, month_end = month_bounds(year, month)
+        if month_end < today:
+            months[month] = {"available": False, "reason": "This month has passed."}
+            continue
+        reason = zone_rule_error(user.zone_code, year, month) if enable_zone_restriction else None
+        if not reason and open_saturdays_in_month(year, month) == 0:
+            reason = "No Saturdays are available in this month."
+        months[month] = {"available": reason is None, "reason": reason}
+    return {
+        "year": year,
+        "zone_code": user.zone_code,
+        "zone_name": ZONE_NAMES.get(user.zone_code, user.zone_code),
+        "already_booked_date": existing.strftime("%Y-%m-%d") if existing else None,
+        "months": months,
+    }
