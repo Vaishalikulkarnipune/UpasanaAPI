@@ -1,18 +1,21 @@
 from datetime import datetime, timedelta
 from flask import jsonify
-from model import db, Booking, User, SundayBooking  # assuming SundayBooking model exists
+from model import db, Booking, User, SundayBooking, BlockedDate
 import calendar
 from sqlalchemy import func
 
-# ✅ Helper: Get all Saturdays from Dec 1 of current year
-def get_saturdays_for_year():
-    start_date = datetime(datetime.now().year, 12, 1)
+# ✅ Helper: Bookable (not admin-blocked) Saturdays of the given year
+def get_saturdays_for_year(year):
+    start_date = datetime(year, 1, 1)
     saturdays = []
-    for i in range(365):
+    for i in range(366):
         date = start_date + timedelta(days=i)
+        if date.year != year:
+            break
         if date.weekday() == 5:  # Saturday = 5
             saturdays.append(date.date())
-    return saturdays
+    blocked = {b.blocked_date for b in BlockedDate.query.filter(BlockedDate.blocked_date.in_(saturdays)).all()}
+    return [d for d in saturdays if d not in blocked]
 
 def has_user_already_booked(user_id, year=None):
     if not year:
@@ -49,6 +52,9 @@ def create_sunday_booking(user_id, booking_date, mahaprasad=False):
     # Ensure booking date is a Sunday (weekday 6 = Sunday)
     if booking_date.weekday() != 6:
         return jsonify({"error": "You can only book on Sundays."}), 400
+
+    if BlockedDate.query.filter_by(blocked_date=booking_date).first():
+        return jsonify({"error": "This Sunday is not available for Upasana booking."}), 400
     
      # Check user exists
     user = User.query.filter_by(id=user_id).first()
@@ -60,7 +66,7 @@ def create_sunday_booking(user_id, booking_date, mahaprasad=False):
         return jsonify({"error": "You have already booked Upasana this year."}), 400
 
     # 1️⃣ Check if all Saturdays are full before allowing Sunday booking
-    saturdays = get_saturdays_for_year()
+    saturdays = get_saturdays_for_year(booking_date.year)
     total_saturdays = len(saturdays)
     total_saturday_bookings = (
         Booking.query.filter(
