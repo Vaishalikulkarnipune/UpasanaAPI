@@ -15,9 +15,9 @@ from datetime import datetime, date
 from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from model import db, Booking, BlockedDate
+from model import db, BlockedDate
 from admin_auth import require_admin
-from Booking import lock_month
+from Booking import lock_month, taken_dates
 
 router = Blueprint("blocked_dates", __name__)
 
@@ -82,16 +82,11 @@ def block_dates():
         for year, month in sorted({(d.year, d.month) for d in dates}):
             lock_month(year, month)
 
-        booked = sorted({
-            b.booking_date.strftime("%Y-%m-%d")
-            for b in Booking.query.filter(
-                Booking.booking_date.in_(dates), Booking.is_active == True
-            ).all()
-        })
+        booked = sorted(d.strftime("%Y-%m-%d") for d in taken_dates(dates))
         if booked:
             db.session.rollback()
             return jsonify({
-                "error": "These dates already have an active booking. Cancel the booking first.",
+                "error": "These dates already have an active booking or event. Cancel it first.",
                 "booked_dates": booked,
             }), 409
 

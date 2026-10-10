@@ -89,6 +89,9 @@ class Booking(db.Model):
     updated_by = db.Column(Integer)
     is_active = db.Column(Boolean, default=True)
 
+    # Booked by an admin on behalf of the member: skips weekday, zone and one-per-year rules
+    booked_by_admin = db.Column(Boolean, default=False, nullable=False, server_default="false")
+
     user = relationship("User", back_populates="bookings")
 
 
@@ -178,6 +181,29 @@ class BlockedDate(db.Model):
 
     def __repr__(self):
         return f"<BlockedDate {self.blocked_date}>"
+
+
+# ============================================================
+# COMMON UPASANA EVENTS (admin-created, not tied to a member)
+# ============================================================
+class UpasanaEvent(db.Model):
+    __tablename__ = "upasana_events"
+
+    id = Column(Integer, primary_key=True)
+    event_date = Column(Date, nullable=False)
+    title = Column(String(200), nullable=False)
+    host_name = Column(String(150))
+    contact_number = Column(String(20))
+    address = Column(Text)
+    note = Column(Text)
+    mahaprasad = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<UpasanaEvent {self.event_date} {self.title}>"
 
 
 # ============================================================
