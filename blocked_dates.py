@@ -76,6 +76,11 @@ def block_dates():
         if d not in dates:
             dates.append(d)
 
+    if len(dates) > 7:
+        return jsonify({"error": "You can block up to 7 days at a time."}), 400
+    if len({(d.year, d.month) for d in dates}) > 1:
+        return jsonify({"error": "Select days within a single month."}), 400
+
     try:
         # Same month locks as bookings, so a booking in flight can't slip in
         # between the check and the insert. Sorted to keep lock order stable.

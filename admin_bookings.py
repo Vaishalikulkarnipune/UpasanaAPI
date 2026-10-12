@@ -10,17 +10,29 @@ Endpoints (all take admin_mobile | admin_user_id)
   POST /admin/upasana-events                     { event_date, title, host_name?, contact_number?,
                                                    address?, note?, mahaprasad? }
   PUT  /admin/upasana-events/<id>                any of the above fields, or { is_active: false } to cancel
+  POST /admin/bookings/check                     member rules an admin action would bypass (warnings only)
 """
 
 import logging
 import re
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from model import db, Booking, User, UpasanaEvent
 from admin_auth import require_admin
-from Booking import admin_create_booking, lock_month, is_date_taken, SLOT_TAKEN_MSG
+from Booking import (
+    admin_create_booking,
+    admin_override_warnings,
+    active_booking_in_year,
+    lock_month,
+    lock_user_and_month,
+    USER_LOCK_NS,
+    is_date_taken,
+    today_ist,
+    SLOT_TAKEN_MSG,
+)
 
 router = Blueprint("admin_bookings", __name__)
 
@@ -199,3 +211,233 @@ def update_event(event_id):
         db.session.rollback()
         logging.exception(f"Error updating event {event_id}: {e}")
         return jsonify({"error": "Failed to update event."}), 500
+
+
+@router.route("/admin/bookings/check", methods=["POST"])
+def check_admin_action():
+    """
+    Member rules an admin action would bypass, shown before the admin confirms.
+    Never blocks: the admin may always go ahead.
+      { action: "book", user_id, booking_date }
+      { action: "reassign", booking_id, user_id }
+      { action: "swap", booking_id, other_booking_id }
+    """
+    err, status, _ = require_admin()
+    if err:
+        return err, status
+
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+    warnings = []
+    try:
+        if action == "book":
+            user = User.query.get(int(data.get("user_id")))
+            booking_date = _parse_date(data.get("booking_date"))
+            if user and booking_date:
+                warnings = admin_override_warnings(user, booking_date)
+
+        elif action == "reassign":
+            booking = Booking.query.get(int(data.get("booking_id")))
+            user = User.query.get(int(data.get("user_id")))
+            if booking and user:
+                existing = active_booking_in_year(user.id, booking.booking_date.year)
+                if existing:
+                    warnings.append(
+                        f"{_host_name(user)} already has an Upasana on {existing.strftime('%d %B %Y')} this year."
+                    )
+                warnings += admin_override_warnings(
+                    user, booking.booking_date, exclude_ids=[booking.id], check_reserved=False
+                )
+
+        elif action == "swap":
+            first = Booking.query.get(int(data.get("booking_id")))
+            second = Booking.query.get(int(data.get("other_booking_id")))
+            if first and second:
+                moved = [first.id, second.id]
+                for booking, new_date in ((first, second.booking_date), (second, first.booking_date)):
+                    user = User.query.get(booking.user_id)
+                    same_month = (new_date.year, new_date.month) == (booking.booking_date.year, booking.booking_date.month)
+                    if not user or same_month:
+                        continue
+                    for text_ in admin_override_warnings(user, new_date, exclude_ids=moved, check_reserved=False):
+                        warnings.append(f"{_host_name(user)}: {text_}")
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid request."}), 400
+    except Exception as e:
+        logging.exception(f"Error checking admin action: {e}")
+        return jsonify({"error": "Could not check the booking rules."}), 500
+
+    return jsonify({"warnings": warnings}), 200
+
+
+def _upcoming_booking(booking_id):
+    """Active booking on today or later, or (None, error message)."""
+    try:
+        booking_id = int(booking_id)
+    except (TypeError, ValueError):
+        return None, "Booking is required."
+    booking = Booking.query.get(booking_id)
+    if not booking or not booking.is_active:
+        return None, "Booking not found."
+    if booking.booking_date < today_ist():
+        return None, "Only an upcoming Upasana can be changed."
+    return booking, None
+
+
+def _drop_cancelled_row(user_id, booking_date):
+    """A cancelled row on the same member and date would block the unique pair."""
+    stale = Booking.query.filter_by(user_id=user_id, booking_date=booking_date, is_active=False).first()
+    if stale:
+        db.session.delete(stale)
+        db.session.flush()
+
+
+def _lock_users_then_months(user_ids, dates):
+    """Users in id order, then months, so two admin edits cannot deadlock."""
+    db.session.execute(text("SET LOCAL lock_timeout = '15s'"))
+    for user_id in sorted({int(uid) for uid in user_ids}):
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+            {"ns": USER_LOCK_NS, "key": user_id},
+        )
+    for year, month in sorted({(d.year, d.month) for d in dates}):
+        lock_month(year, month)
+
+
+def _host_name(user):
+    return " ".join(p for p in [user.first_name, user.middle_name, user.last_name] if p)
+
+
+@router.route("/admin/bookings/swap", methods=["POST"])
+def swap_bookings():
+    """Exchange the dates of two upcoming member bookings."""
+    err, status, admin_label = require_admin()
+    if err:
+        return err, status
+
+    data = request.get_json(silent=True) or {}
+    first, error = _upcoming_booking(data.get("booking_id"))
+    if error:
+        return jsonify({"error": error}), 400
+    second, error = _upcoming_booking(data.get("other_booking_id"))
+    if error:
+        return jsonify({"error": error}), 400
+    if first.id == second.id:
+        return jsonify({"error": "Choose two different bookings."}), 400
+
+    date_a, date_b = first.booking_date, second.booking_date
+    try:
+        _lock_users_then_months([first.user_id, second.user_id], [date_a, date_b])
+
+        first.is_active = False
+        second.is_active = False
+        db.session.flush()
+        _drop_cancelled_row(first.user_id, date_b)
+        _drop_cancelled_row(second.user_id, date_a)
+
+        now = datetime.utcnow()
+        first.booking_date = date_b
+        second.booking_date = date_a
+        first.is_active = True
+        second.is_active = True
+        first.updated_date = now
+        second.updated_date = now
+        first.updated_by = None
+        db.session.commit()
+        logging.info(f"Admin {admin_label} swapped bookings {first.id} and {second.id}")
+        return jsonify({
+            "message": "Dates swapped.",
+            "bookings": [
+                {"booking_id": first.id, "booking_date": date_b.strftime("%Y-%m-%d"), "user_id": first.user_id},
+                {"booking_id": second.id, "booking_date": date_a.strftime("%Y-%m-%d"), "user_id": second.user_id},
+            ],
+        }), 200
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "These dates could not be swapped. Refresh and try again."}), 409
+    except OperationalError:
+        db.session.rollback()
+        return jsonify({"error": "Server is busy. Please retry in a moment."}), 503
+    except Exception as e:
+        db.session.rollback()
+        logging.exception(f"Error swapping bookings: {e}")
+        return jsonify({"error": "Failed to swap bookings."}), 500
+
+
+@router.route("/admin/bookings/reassign", methods=["POST"])
+def reassign_booking():
+    """Give an upcoming booking to another member. The date stays; host details follow the new member."""
+    err, status, admin_label = require_admin()
+    if err:
+        return err, status
+
+    data = request.get_json(silent=True) or {}
+    booking, error = _upcoming_booking(data.get("booking_id"))
+    if error:
+        return jsonify({"error": error}), 400
+    try:
+        new_user_id = int(data.get("user_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Choose the new host."}), 400
+
+    new_user = User.query.get(new_user_id)
+    if not new_user:
+        return jsonify({"error": "Member not found."}), 404
+    if new_user.id == booking.user_id:
+        return jsonify({"error": "This member is already the host."}), 400
+
+    try:
+        _lock_users_then_months([booking.user_id, new_user.id], [booking.booking_date])
+        _drop_cancelled_row(new_user.id, booking.booking_date)
+        booking.user_id = new_user.id
+        booking.booked_by_admin = True
+        booking.updated_date = datetime.utcnow()
+        db.session.commit()
+        logging.info(f"Admin {admin_label} reassigned booking {booking.id} to user {new_user.id}")
+        return jsonify({
+            "message": "Host updated.",
+            "booking_id": booking.id,
+            "user_id": new_user.id,
+            "host_name": _host_name(new_user),
+            "booking_date": booking.booking_date.strftime("%Y-%m-%d"),
+        }), 200
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "This member cannot take this date. Refresh and try again."}), 409
+    except OperationalError:
+        db.session.rollback()
+        return jsonify({"error": "Server is busy. Please retry in a moment."}), 503
+    except Exception as e:
+        db.session.rollback()
+        logging.exception(f"Error reassigning booking: {e}")
+        return jsonify({"error": "Failed to change the host."}), 500
+
+
+@router.route("/admin/bookings/cancel", methods=["POST"])
+def cancel_booking():
+    """Free an upcoming date. Another host can be added later."""
+    err, status, admin_label = require_admin()
+    if err:
+        return err, status
+
+    booking, error = _upcoming_booking((request.get_json(silent=True) or {}).get("booking_id"))
+    if error:
+        return jsonify({"error": error}), 400
+
+    try:
+        lock_user_and_month(booking.user_id, booking.booking_date)
+        booking.is_active = False
+        booking.updated_date = datetime.utcnow()
+        db.session.commit()
+        logging.info(f"Admin {admin_label} cancelled booking {booking.id}")
+        return jsonify({
+            "message": "Booking cancelled. The date is free for another host.",
+            "booking_date": booking.booking_date.strftime("%Y-%m-%d"),
+        }), 200
+    except OperationalError:
+        db.session.rollback()
+        return jsonify({"error": "Server is busy. Please retry in a moment."}), 503
+    except Exception as e:
+        db.session.rollback()
+        logging.exception(f"Error cancelling booking: {e}")
+        return jsonify({"error": "Failed to cancel the booking."}), 500
