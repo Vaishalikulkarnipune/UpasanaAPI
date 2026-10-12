@@ -109,22 +109,31 @@ def open_saturdays_in_month(year, month):
     return sum(1 for d in candidates if d not in blocked and d not in taken)
 
 
-def zone_rule_error(zone_code, year, month):
-    """Monthly zone allocation check. Returns an error message or None."""
+def zone_slot_status(zone_code, year, month):
+    """None when the zone may still book. Otherwise zone_unknown, zone_full, or reserved."""
     if zone_code not in ZONE_LIMITS:
-        return "Your zone is not set up for Upasana booking. Please contact the admin to update your pincode/zone."
+        return "zone_unknown"
 
     counts = monthly_zone_counts(year, month)
-    zone_name = ZONE_NAMES[zone_code]
-    full_msg = f"{zone_name} is full for this month. Please try another month."
-
     if counts.get(zone_code, 0) >= ZONE_LIMITS[zone_code]:
-        return full_msg
+        return "zone_full"
 
-    # The last open date of a month is held for Zone A until Zone A has its booking
+    # The last open date of a month is held for Zone A until Zone A has its booking.
     if zone_code != "A" and counts.get("A", 0) == 0 and open_saturdays_in_month(year, month) <= 1:
-        return full_msg
+        return "reserved"
 
+    return None
+
+
+def zone_rule_error(zone_code, year, month):
+    """Monthly zone allocation check. Returns an error message or None."""
+    status = zone_slot_status(zone_code, year, month)
+    if status == "zone_unknown":
+        return "Your zone is not set up for Upasana booking. Please contact the admin to update your pincode/zone."
+    if status == "reserved":
+        return "The remaining date this month is reserved for Zone A. Please choose another month."
+    if status == "zone_full":
+        return f"{ZONE_NAMES[zone_code]} is full for this month. Please try another month."
     return None
 
 
@@ -150,25 +159,25 @@ def active_booking_in_year(user_id, year):
 def check_booking_rules(user, booking_date, enable_zone_restriction):
     """
     Every rule a booking must pass. Call while holding lock_user_and_month().
-    Returns (message, status_code) when not allowed, else None.
+    Returns (message, status_code, code) when not allowed, else None.
     """
     blocked = BlockedDate.query.filter_by(blocked_date=booking_date).first()
     if blocked:
         message = "This date is not available for Upasana booking."
         if blocked.reason:
             message = f"{message} ({blocked.reason})"
-        return message, 400
+        return message, 400, "blocked"
 
     if is_date_taken(booking_date):
-        return SLOT_TAKEN_MSG, 409
+        return SLOT_TAKEN_MSG, 409, "date_taken"
 
     if active_booking_in_year(user.id, booking_date.year):
-        return "You have already made one booking for this year.", 400
+        return "You have already made one booking for this year.", 400, "already_booked"
 
     if enable_zone_restriction:
-        error = zone_rule_error(user.zone_code, booking_date.year, booking_date.month)
-        if error:
-            return error, 400
+        status = zone_slot_status(user.zone_code, booking_date.year, booking_date.month)
+        if status:
+            return zone_rule_error(user.zone_code, booking_date.year, booking_date.month), 400, status
 
     return None
 
@@ -224,9 +233,9 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
         rule_error = check_booking_rules(user, booking_date, enable_zone_restriction)
         if rule_error:
             db.session.rollback()
-            message, status = rule_error
+            message, status, code = rule_error
             logging.info(f"Booking rejected user={user_id} date={booking_date}: {message}")
-            return jsonify({"error": message}), status
+            return jsonify({"error": message, "code": code}), status
 
         now = datetime.utcnow()
         db.session.add(Booking(
@@ -245,7 +254,7 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
     except IntegrityError as e:
         db.session.rollback()
         logging.warning(f"Booking integrity conflict user={user_id} date={booking_date}: {e}")
-        return jsonify({"error": SLOT_TAKEN_MSG}), 409
+        return jsonify({"error": SLOT_TAKEN_MSG, "code": "date_taken"}), 409
     except OperationalError as e:
         db.session.rollback()
         logging.warning(f"Booking operational error user={user_id} date={booking_date}: {e}")
@@ -312,6 +321,58 @@ def admin_create_booking(user_id, booking_date, mahaprasad, admin_label):
         return jsonify({"error": "Unexpected error during booking."}), 500
 
 
+def zone_bookings_in_month(zone_code, year, month, exclude_ids=()):
+    """Every active booking (member or admin) held by a zone's members in a month."""
+    start, end = month_bounds(year, month)
+    query = (
+        db.session.query(func.count(Booking.id))
+        .join(User, User.id == Booking.user_id)
+        .filter(
+            User.zone_code == zone_code,
+            Booking.booking_date >= start,
+            Booking.booking_date <= end,
+            Booking.is_active == True,
+        )
+    )
+    if exclude_ids:
+        query = query.filter(Booking.id.notin_(list(exclude_ids)))
+    return query.scalar() or 0
+
+
+def admin_override_warnings(user, booking_date, exclude_ids=(), check_reserved=True):
+    """
+    Member rules that putting this member on this date would bypass. Informational only:
+    an admin may always go ahead. exclude_ids are bookings being moved away by the same action.
+    """
+    warnings = []
+    month_label = booking_date.strftime("%B %Y")
+    is_saturday = booking_date.weekday() == calendar.SATURDAY
+    if not is_saturday:
+        warnings.append(f"{booking_date.strftime('%A')} is not a Saturday. Members can book Saturdays only.")
+
+    zone = user.zone_code
+    limit = ZONE_LIMITS.get(zone)
+    if not limit:
+        warnings.append(f"Zone '{zone or '-'}' is not set up for Upasana booking.")
+        return warnings
+
+    count = zone_bookings_in_month(zone, booking_date.year, booking_date.month, exclude_ids)
+    if count >= limit:
+        warnings.append(
+            f"Zone {zone} already has {count} Upasana in {month_label} (limit {limit}). "
+            "This goes over the zone limit."
+        )
+    elif (
+        check_reserved
+        and is_saturday
+        and zone != "A"
+        and zone_bookings_in_month("A", booking_date.year, booking_date.month, exclude_ids) == 0
+        and open_saturdays_in_month(booking_date.year, booking_date.month) <= 1
+    ):
+        warnings.append(f"This is the last free Saturday of {month_label}, normally kept for Zone A.")
+    return warnings
+
+
 # =======================================================
 # ♻️ Reactivate a cancelled booking
 # =======================================================
@@ -331,12 +392,12 @@ def reactivate_booking(booking_id, user_id, enable_zone_restriction=True):
         lock_user_and_month(user_id, booking.booking_date)
 
         if booking.booked_by_admin:
-            rule_error = (SLOT_TAKEN_MSG, 409) if is_date_taken(booking.booking_date) else None
+            rule_error = (SLOT_TAKEN_MSG, 409, "date_taken") if is_date_taken(booking.booking_date) else None
         else:
             rule_error = check_booking_rules(user, booking.booking_date, enable_zone_restriction)
         if rule_error:
             db.session.rollback()
-            message, status = rule_error
+            message, status, _code = rule_error
             return jsonify({"error": f"Cannot reactivate: {message}"}), status
 
         booking.is_active = True
@@ -367,12 +428,25 @@ def booking_availability(user, year, enable_zone_restriction=True):
     for month in range(1, 13):
         _, month_end = month_bounds(year, month)
         if month_end < today:
-            months[month] = {"available": False, "reason": "This month has passed."}
+            months[month] = {"available": False, "reason": "This month has passed.", "code": "passed"}
             continue
-        reason = zone_rule_error(user.zone_code, year, month) if enable_zone_restriction else None
-        if not reason and open_saturdays_in_month(year, month) == 0:
+        code = zone_slot_status(user.zone_code, year, month) if enable_zone_restriction else None
+        reason = zone_rule_error(user.zone_code, year, month) if code else None
+        if not code and open_saturdays_in_month(year, month) == 0:
             reason = "No Saturdays are available in this month."
-        months[month] = {"available": reason is None, "reason": reason}
+            code = "no_saturdays"
+        limit = ZONE_LIMITS.get(user.zone_code)
+        used = monthly_zone_counts(year, month).get(user.zone_code, 0) if limit else 0
+        months[month] = {
+            "available": code is None,
+            "reason": reason,
+            "code": code,
+            "limit": limit,
+            "places_left": max(0, limit - used) if limit else None,
+            "open_saturdays": 0 if month_end < today else open_saturdays_in_month(year, month),
+            "saturday_count": len(saturdays_in_month(year, month)),
+            "other_zone": "A" if code == "reserved" else None,
+        }
     return {
         "year": year,
         "zone_code": user.zone_code,
