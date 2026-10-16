@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from model import db, BlockedDate
 from admin_auth import require_admin
-from Booking import lock_month, taken_dates
+from Booking import lock_month, taken_dates, note_zone_change
 
 router = Blueprint("blocked_dates", __name__)
 
@@ -102,6 +102,7 @@ def block_dates():
         for d in to_block:
             db.session.add(BlockedDate(blocked_date=d, reason=reason, created_by=admin_label))
         db.session.commit()
+        note_zone_change()
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Some dates were blocked by another admin at the same time. Refresh and try again."}), 409
@@ -133,6 +134,7 @@ def unblock_date(date_str):
     try:
         deleted = BlockedDate.query.filter_by(blocked_date=d).delete()
         db.session.commit()
+        note_zone_change()
     except Exception as e:
         db.session.rollback()
         logging.error(f"Error in unblock_date: {e}")

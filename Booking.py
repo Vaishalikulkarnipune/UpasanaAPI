@@ -3,6 +3,7 @@ from flask import jsonify
 from model import db, Booking, User, BlockedDate, SundayBooking, UpasanaEvent
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError, OperationalError
+import schema_check
 import calendar
 import logging
 
@@ -21,6 +22,36 @@ USER_LOCK_NS = 1001
 MONTH_LOCK_NS = 1002
 
 SLOT_TAKEN_MSG = "This date is no longer available. Please select another date."
+
+def booking_zone():
+    """The zone a booking counts for: the one saved on it, else (older rows) the member's profile."""
+    if schema_check.has("bookings.zone_code"):
+        return func.coalesce(Booking.zone_code, User.zone_code)
+    return User.zone_code
+
+
+def host_snapshot(user):
+    """Zone and area to save on a booking for this host (nothing when the columns don't exist)."""
+    if not schema_check.has("bookings.zone_code"):
+        return {}
+    return {"zone_code": user.zone_code, "host_area": ((user.area or "").strip() or None)}
+
+
+def set_host_snapshot(booking, user):
+    for field, value in host_snapshot(user).items():
+        setattr(booking, field, value)
+
+
+def _trial_value(is_trial):
+    """{"is_trial": ...} for a new Booking, or nothing when the column does not exist."""
+    return {"is_trial": bool(is_trial)} if schema_check.has("bookings.is_trial") else {}
+
+
+def note_zone_change():
+    """After any change to bookings, events or blocked dates: update the per-zone 'completed at' stamps."""
+    from zone_completion import record_zone_completion   # imported late: zone_completion imports this module
+    record_zone_completion()
+
 
 def today_ist():
     return (datetime.utcnow() + IST_OFFSET).date()
@@ -80,8 +111,9 @@ def lock_user_and_month(user_id, booking_date):
 def monthly_zone_counts(year, month):
     """Member self-bookings per zone; admin bookings don't use up a zone's monthly quota."""
     start, end = month_bounds(year, month)
+    zone = booking_zone()
     rows = (
-        db.session.query(User.zone_code, func.count(Booking.id))
+        db.session.query(zone, func.count(Booking.id))
         .join(User, User.id == Booking.user_id)
         .filter(
             Booking.booking_date >= start,
@@ -89,7 +121,7 @@ def monthly_zone_counts(year, month):
             Booking.is_active == True,
             Booking.booked_by_admin == False,
         )
-        .group_by(User.zone_code)
+        .group_by(zone)
         .all()
     )
     return {zone: count for zone, count in rows}
@@ -107,6 +139,57 @@ def open_saturdays_in_month(year, month):
     }
     taken = taken_dates(candidates)
     return sum(1 for d in candidates if d not in blocked and d not in taken)
+
+
+def year_zone_overview(year, enable_zone_restriction=True):
+    """
+    For every zone, the months of the year in which one of its members could still book, plus
+    each zone's active bookings. Same rules as zone_slot_status(), from three bulk queries.
+    """
+    today = today_ist()
+    start, end = date(year, 1, 1), date(year, 12, 31)
+    rows = (
+        db.session.query(Booking.booking_date, Booking.booked_by_admin, booking_zone())
+        .join(User, User.id == Booking.user_id)
+        .filter(Booking.booking_date >= start, Booking.booking_date <= end, Booking.is_active == True)
+        .all()
+    )
+    events = {
+        e.event_date
+        for e in UpasanaEvent.query.filter(
+            UpasanaEvent.event_date >= start, UpasanaEvent.event_date <= end, UpasanaEvent.is_active == True
+        ).all()
+    }
+    blocked = {
+        b.blocked_date
+        for b in BlockedDate.query.filter(BlockedDate.blocked_date >= start, BlockedDate.blocked_date <= end).all()
+    }
+    taken = {row[0] for row in rows} | events
+
+    member_counts = {}      # (month, zone) -> member self-bookings, which use up the zone's quota
+    booking_counts = {zone: 0 for zone in ZONE_LIMITS}
+    for booking_date, by_admin, zone in rows:
+        if zone in booking_counts:
+            booking_counts[zone] += 1
+        if not by_admin:
+            member_counts[(booking_date.month, zone)] = member_counts.get((booking_date.month, zone), 0) + 1
+
+    open_months = {zone: [] for zone in ZONE_LIMITS}
+    for month in range(1, 13):
+        open_saturdays = [
+            d for d in saturdays_in_month(year, month) if d >= today and d not in blocked and d not in taken
+        ]
+        if not open_saturdays:
+            continue
+        for zone, limit in ZONE_LIMITS.items():
+            if enable_zone_restriction:
+                if member_counts.get((month, zone), 0) >= limit:
+                    continue
+                # The last open date of a month is held for Zone A until Zone A has its booking.
+                if zone != "A" and member_counts.get((month, "A"), 0) == 0 and len(open_saturdays) <= 1:
+                    continue
+            open_months[zone].append(month)
+    return {"open_months": open_months, "booking_counts": booking_counts}
 
 
 def zone_slot_status(zone_code, year, month):
@@ -198,7 +281,7 @@ def _parse_date(booking_date):
 # =======================================================
 # 🧱 Main Booking Function
 # =======================================================
-def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restriction=True):
+def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restriction=True, is_trial=False):
     """Creates a booking after validating every rule while holding the user and month locks."""
     booking_date = _parse_date(booking_date)
     if not booking_date:
@@ -246,10 +329,15 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
             updated_date=now,
             updated_by=user_id,
             is_active=True,
+            **_trial_value(is_trial),
+            **host_snapshot(user),
         ))
         db.session.commit()
-        logging.info(f"Booking successful user={user_id} date={booking_date}")
-        return jsonify({"message": "Booking successful.", "booking_date": str(booking_date)}), 201
+        note_zone_change()
+        logging.info(f"Booking successful user={user_id} date={booking_date} trial={bool(is_trial)}")
+        return jsonify({
+            "message": "Booking successful.", "booking_date": str(booking_date), "is_trial": bool(is_trial),
+        }), 201
 
     except IntegrityError as e:
         db.session.rollback()
@@ -268,7 +356,7 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
 # =======================================================
 # 🛡️ Admin booking on behalf of a member
 # =======================================================
-def admin_create_booking(user_id, booking_date, mahaprasad, admin_label):
+def admin_create_booking(user_id, booking_date, mahaprasad, admin_label, is_trial=False):
     """Any date, no zone / weekday / one-per-year / blocked-date rules; the date must still be free."""
     booking_date = _parse_date(booking_date)
     if not booking_date:
@@ -292,6 +380,9 @@ def admin_create_booking(user_id, booking_date, mahaprasad, admin_label):
             booking.is_active = True
             booking.mahaprasad = bool(mahaprasad)
             booking.booked_by_admin = True
+            set_host_snapshot(booking, user)
+            if schema_check.has("bookings.is_trial"):
+                booking.is_trial = bool(is_trial)
             booking.updated_date = now
         else:
             booking = Booking(
@@ -302,9 +393,12 @@ def admin_create_booking(user_id, booking_date, mahaprasad, admin_label):
                 updated_date=now,
                 is_active=True,
                 booked_by_admin=True,
+                **_trial_value(is_trial),
+                **host_snapshot(user),
             )
             db.session.add(booking)
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} booked user={user.id} date={booking_date}")
         return jsonify({"message": "Upasana booked.", "booking_id": booking.id, "booking_date": str(booking_date)}), 201
 
@@ -328,7 +422,7 @@ def zone_bookings_in_month(zone_code, year, month, exclude_ids=()):
         db.session.query(func.count(Booking.id))
         .join(User, User.id == Booking.user_id)
         .filter(
-            User.zone_code == zone_code,
+            booking_zone() == zone_code,
             Booking.booking_date >= start,
             Booking.booking_date <= end,
             Booking.is_active == True,
@@ -403,6 +497,7 @@ def reactivate_booking(booking_id, user_id, enable_zone_restriction=True):
         booking.is_active = True
         booking.updated_date = datetime.utcnow()
         db.session.commit()
+        note_zone_change()
         return jsonify({"message": "Booking activated successfully"}), 200
 
     except IntegrityError:
@@ -453,4 +548,9 @@ def booking_availability(user, year, enable_zone_restriction=True):
         "zone_name": ZONE_NAMES.get(user.zone_code, user.zone_code),
         "already_booked_date": existing.strftime("%Y-%m-%d") if existing else None,
         "months": months,
+        # Zones that still have at least one bookable month, so a member with no date left can be
+        # told who the remaining dates are for.
+        "zones_with_dates": [
+            zone for zone, open_ in year_zone_overview(year, enable_zone_restriction)["open_months"].items() if open_
+        ],
     }

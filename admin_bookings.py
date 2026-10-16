@@ -22,8 +22,11 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from model import db, Booking, User, UpasanaEvent
 from admin_auth import require_admin
+from upasana_settings import trial_is_active
 from Booking import (
     admin_create_booking,
+    set_host_snapshot,
+    note_zone_change,
     admin_override_warnings,
     active_booking_in_year,
     lock_month,
@@ -115,7 +118,9 @@ def admin_book():
         return jsonify({"error": "Member is required."}), 400
     if not data.get("booking_date"):
         return jsonify({"error": "Booking date is required."}), 400
-    return admin_create_booking(user_id, data["booking_date"], data.get("mahaprasad", False), admin_label)
+    return admin_create_booking(
+        user_id, data["booking_date"], data.get("mahaprasad", False), admin_label, is_trial=trial_is_active()
+    )
 
 
 def _event_fields(data, partial):
@@ -154,6 +159,7 @@ def create_event():
         event = UpasanaEvent(**values, is_active=True, created_by=admin_label)
         db.session.add(event)
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} created event {event.id} on {event.event_date}")
         return jsonify({"message": "Event added.", "event": event_to_dict(event)}), 201
     except OperationalError:
@@ -184,6 +190,7 @@ def update_event(event_id):
         if data.get("is_active") is False:
             event.is_active = False
             db.session.commit()
+            note_zone_change()
             logging.info(f"Admin {admin_label} cancelled event {event_id}")
             return jsonify({"message": "Event cancelled."}), 200
 
@@ -202,6 +209,7 @@ def update_event(event_id):
             setattr(event, field, value)
         event.is_active = True
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} updated event {event_id}")
         return jsonify({"message": "Event updated.", "event": event_to_dict(event)}), 200
     except OperationalError:
@@ -344,6 +352,7 @@ def swap_bookings():
         second.updated_date = now
         first.updated_by = None
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} swapped bookings {first.id} and {second.id}")
         return jsonify({
             "message": "Dates swapped.",
@@ -390,9 +399,11 @@ def reassign_booking():
         _lock_users_then_months([booking.user_id, new_user.id], [booking.booking_date])
         _drop_cancelled_row(new_user.id, booking.booking_date)
         booking.user_id = new_user.id
+        set_host_snapshot(booking, new_user)       # the new host's zone and area
         booking.booked_by_admin = True
         booking.updated_date = datetime.utcnow()
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} reassigned booking {booking.id} to user {new_user.id}")
         return jsonify({
             "message": "Host updated.",
@@ -429,6 +440,7 @@ def cancel_booking():
         booking.is_active = False
         booking.updated_date = datetime.utcnow()
         db.session.commit()
+        note_zone_change()
         logging.info(f"Admin {admin_label} cancelled booking {booking.id}")
         return jsonify({
             "message": "Booking cancelled. The date is free for another host.",

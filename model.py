@@ -20,6 +20,8 @@ db = SQLAlchemy()
 # ============================================================
 class User(db.Model):
     __tablename__ = 'users'
+    # Same as Booking: never name created_at after an INSERT unless it is written explicitly.
+    __mapper_args__ = {"eager_defaults": False}
 
     id = db.Column(db.Integer, primary_key=True)
 
@@ -60,6 +62,12 @@ class User(db.Model):
     # NULL for pre-existing users (treated as False)
     is_quick_registered = db.Column(db.Boolean, default=None, nullable=True)
 
+    # When the member registered, in IST; see migrations/add_user_joined_date.sql
+    # Deferred: only loaded when read, so member lookups work even if the column is missing.
+    created_at = db.deferred(
+        db.Column(db.DateTime, nullable=True, server_default=db.text("(NOW() AT TIME ZONE 'Asia/Kolkata')"))
+    )
+
     # Relationships
     bookings = relationship("Booking", back_populates="user")
     sunday_bookings = relationship("SundayBooking", back_populates="user")
@@ -76,6 +84,9 @@ class User(db.Model):
 # ============================================================
 class Booking(db.Model):
     __tablename__ = 'bookings'
+    # Don't ask the database to return server-default columns after INSERT: that would name
+    # is_trial even when the column is missing (see schema_check).
+    __mapper_args__ = {"eager_defaults": False}
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, ForeignKey('users.id'), nullable=False)
@@ -91,6 +102,17 @@ class Booking(db.Model):
 
     # Booked by an admin on behalf of the member: skips weekday, zone and one-per-year rules
     booked_by_admin = db.Column(Boolean, default=False, nullable=False, server_default="false")
+
+    # Created while the admin's Trial Run was active: practice only. Deleted by the admin by hand.
+    # Deferred and no Python default: bookings work even if the column is missing (see schema_check).
+    is_trial = db.deferred(db.Column(Boolean, nullable=False, server_default="false"))
+
+    # The host's zone and area when the booking was made (or the host was changed). Zone limits,
+    # zone completion and analysis use these, so a later profile change does not move past bookings.
+    # NULL (e.g. before migrations/add_booking_zone_snapshot.sql) falls back to the member's profile.
+    # FetchedValue: left out of INSERTs unless set, so bookings still work if the columns are missing.
+    zone_code = db.deferred(db.Column(String(20), nullable=True, server_default=db.FetchedValue()))
+    host_area = db.deferred(db.Column(String(100), nullable=True, server_default=db.FetchedValue()))
 
     user = relationship("User", back_populates="bookings")
 

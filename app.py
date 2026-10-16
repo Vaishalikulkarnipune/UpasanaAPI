@@ -1,10 +1,11 @@
 from flask import Flask, request, jsonify
 import psycopg2
 from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission,AdhikMaasArea,BlockedDate,UpasanaEvent
-from Booking import create_booking, reactivate_booking
+from Booking import create_booking, reactivate_booking, note_zone_change
 from datetime import datetime
 from sqlalchemy import text
 from config import get_db_connection, release_db_connection,Config
+import schema_check
 from werkzeug.security import generate_password_hash, check_password_hash
 import re
 from flask_cors import CORS
@@ -12,8 +13,12 @@ import logging
 from janmotsav import router as janmotsav_bp
 from adhik_maas import router as adhik_maas_bp
 from blocked_dates import router as blocked_dates_bp
-from upasana_settings import router as upasana_settings_bp, get_booking_settings
+from upasana_settings import router as upasana_settings_bp, get_booking_settings, trial_is_active
 from admin_bookings import router as admin_bookings_bp, event_to_dict
+from zone_completion import router as zone_completion_bp
+from profile_changes import router as profile_changes_bp, SCHEMA as PROFILE_SCHEMA, mark_updated, actor_label, last_updated
+from user_stats import router as user_stats_bp
+from admin_dashboard import router as admin_dashboard_bp
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +33,10 @@ app.register_blueprint(adhik_maas_bp)
 app.register_blueprint(blocked_dates_bp)
 app.register_blueprint(upasana_settings_bp)
 app.register_blueprint(admin_bookings_bp)
+app.register_blueprint(zone_completion_bp)
+app.register_blueprint(profile_changes_bp)
+app.register_blueprint(user_stats_bp)
+app.register_blueprint(admin_dashboard_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 
@@ -36,6 +45,13 @@ db.init_app(app)
 # Runs in order: the column must exist before the member-only index uses it.
 _BOOKING_INDEXES = [
     "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booked_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT FALSE",
+    # Host zone/area at booking time (see migrations/add_booking_zone_snapshot.sql for existing rows)
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS zone_code VARCHAR(20)",
+    "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_area VARCHAR(100)",
+    # When a member registered, in IST (the app is used in India only).
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
+    "ALTER TABLE users ALTER COLUMN created_at SET DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')",
     """CREATE UNIQUE INDEX IF NOT EXISTS uq_bookings_active_date_2027
        ON bookings (booking_date)
        WHERE is_active AND booking_date >= DATE '2027-01-01'""",
@@ -54,17 +70,26 @@ with app.app_context():
             table.create(bind=db.engine, checkfirst=True)
         except Exception as e:
             logging.warning(f"Could not ensure {table.name} table exists: {e}")
-    for ddl in _BOOKING_INDEXES:
+    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA:
         try:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
         except Exception as e:
             logging.warning(f"Could not apply booking schema change: {e}")
+    # Which of the newer columns exist; code using them falls back when they do not.
+    schema_check.refresh(db.engine)
 # Configure logging to ensure all logs are captured
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Allow browser (Chrome) and other clients: any origin for local/dev
 CORS(app, origins="*", allow_headers=["Content-Type", "Authorization"])
+
+def _joined_insert():
+    """Joining date for a new member's INSERT, or nothing when users.created_at does not exist."""
+    if schema_check.has("users.created_at"):
+        return {"joined_col": ", created_at", "joined_val": ", (NOW() AT TIME ZONE 'Asia/Kolkata')"}
+    return {"joined_col": "", "joined_val": ""}
+
 
 def validate_email(email):
     pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
@@ -456,16 +481,16 @@ def admin_quick_register():
                 mobile_number, full_address, area, landmark,
                 city, state, pincode,
                 anugrahit, gender, zone_code,
-                force_password_change, is_quick_registered
+                force_password_change, is_quick_registered{joined_col}
             ) VALUES (
                 %s, %s, NULL,
                 %s, %s,
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s,
-                FALSE, TRUE
+                FALSE, TRUE{joined_val}
             ) RETURNING id
-            """,
+            """.format(**_joined_insert()),
             (
                 first_name, last_name,
                 "123456", "123456",
@@ -576,6 +601,10 @@ def complete_profile(user_id):
     user.zone_code           = zone_code
     user.is_quick_registered = False
     user.force_password_change = False
+    user.latitude = None
+    user.longitude = None
+    db.session.flush()
+    mark_updated(None, user_id, f"Member: {' '.join(p for p in [user.first_name, user.last_name] if p)} (completed profile)")
 
     try:
         db.session.commit()
@@ -695,7 +724,9 @@ def book():
                 "error": f"Bookings are only allowed for the year {allowed_booking_year}."
             }), 400
 
-        return create_booking(user_id, booking_date, mahaprasad, settings["enable_zone_restriction"])
+        return create_booking(
+            user_id, booking_date, mahaprasad, settings["enable_zone_restriction"], is_trial=trial_is_active()
+        )
     except Exception as e:
         logging.exception(f"Unexpected error in book: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
@@ -938,12 +969,12 @@ def get_booking_users_by_year():
                 bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
                 bookings.created_at, bookings.is_active,
                 bookings.updated_date, bookings.updated_by, users.isadmin,
-                users.zone_code, bookings.booked_by_admin
+                users.zone_code, bookings.booked_by_admin, {trial}
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
             WHERE EXTRACT(YEAR FROM bookings.booking_date) = %s
             ORDER BY bookings.booking_date ASC
-        """
+        """.format(trial="bookings.is_trial" if schema_check.has("bookings.is_trial") else "FALSE")
 
         logging.debug(f"🧾 SQL Query: {query.strip()} | Params: {year}")
         cursor.execute(query, (year,))
@@ -1000,6 +1031,7 @@ def get_booking_users_by_year():
                 'updated_by': row[23],
                 'user_id': user_id,
                 'booked_by_admin': bool(row[26]),
+                'is_trial': bool(row[27]),
             })
 
         response_data = {'year': year, 'users': list(users_with_bookings.values()), 'events': events}
@@ -1180,9 +1212,9 @@ def register_user():
         INSERT INTO users (
             first_name, middle_name, last_name, email, password, confirm_password,
             mobile_number, alternate_mobile_number, flat_no, full_address, area,
-            landmark, city, state, pincode, anugrahit, gender, zone_code
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
-        """
+            landmark, city, state, pincode, anugrahit, gender, zone_code{joined_col}
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s{joined_val})
+        """.format(**_joined_insert())
 
         # Execute the query
         cursor.execute(insert_query, (
@@ -1266,9 +1298,13 @@ def get_all_users():
             SELECT id, first_name, middle_name, last_name, email,
                    mobile_number, alternate_mobile_number, flat_no, full_address,
                    area, landmark, city, state, pincode, anugrahit, gender, unique_family_code,
-                   zone_code
+                   zone_code, {joined}, {updated_at}, {updated_by}
             FROM users
-            """
+            """.format(
+                joined="created_at" if schema_check.has("users.created_at") else "NULL",
+                updated_at="updated_at" if schema_check.has("users.updated_at") else "NULL",
+                updated_by="updated_by" if schema_check.has("users.updated_by") else "NULL",
+            )
         )
         users = cursor.fetchall()
 
@@ -1294,6 +1330,10 @@ def get_all_users():
                 'gender': user[15],
                 'unique_family_code': user[16],
                 'zone_code': user[17] or '',
+                # When the member registered, IST (ISO with +05:30); see migrations/add_user_joined_date.sql
+                'created_at': user[18].strftime('%Y-%m-%dT%H:%M:%S+05:30') if user[18] else None,
+                'updated_at': user[19].strftime('%Y-%m-%dT%H:%M:%S+05:30') if user[19] else None,
+                'updated_by': user[20],
             }
             user_list.append(user_data)
 
@@ -1334,6 +1374,21 @@ def update_user(user_id):
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # A changed PIN code also sets the member's zone (same lookup as registration).
+        if 'pincode' in updated_data:
+            pincode = str(updated_data['pincode'] or '').strip()
+            cursor.execute("SELECT zone_code FROM Zone WHERE pincode = %s", (pincode,))
+            zone_row = cursor.fetchone()
+            if not zone_row:
+                return jsonify({"error": f"PIN code {pincode} is not in the zone list. Please check it or contact the administrator."}), 400
+            updated_data['pincode'] = pincode
+            updated_data['zone_code'] = zone_row[0]
+
+        # A new address means the cached map location is wrong; it is looked up again later.
+        if {'flat_no', 'full_address', 'area', 'landmark', 'pincode'} & set(updated_data):
+            updated_data['latitude'] = None
+            updated_data['longitude'] = None
+
         # Build the dynamic SQL update query
         set_clause = ', '.join([f"{key} = %s" for key in updated_data])
         values = list(updated_data.values())
@@ -1342,9 +1397,13 @@ def update_user(user_id):
         update_query = f"UPDATE users SET {set_clause} WHERE id = %s"
         
         cursor.execute(update_query, values)
+        # Who changed it: the app sends the logged-in admin's id (or the super-admin mobile)
+        mark_updated(cursor, user_id, actor_label(data.get('updated_by_user_id')))
         conn.commit()
+        if 'zone_code' in updated_data:
+            note_zone_change()      # a zone change can complete or reopen a zone
 
-        return jsonify({"message": "User updated successfully"}), 200
+        return jsonify({"message": "User updated successfully", **last_updated(user_id)}), 200
 
     except psycopg2.DatabaseError as db_err:
         if conn:
@@ -1440,6 +1499,11 @@ def get_user_by_id(user_id):
             'isadmin': user[22],
             'note': user[23],
         }
+        if schema_check.has("users.created_at"):
+            cursor.execute("SELECT created_at FROM users WHERE id = %s", (user_id,))
+            joined = cursor.fetchone()[0]
+            user_data['created_at'] = joined.strftime('%Y-%m-%dT%H:%M:%S+05:30') if joined else None
+        user_data.update(last_updated(user_id))
 
         return jsonify(user_data), 200
 
@@ -1623,6 +1687,7 @@ def update_booking():
             logging.info(f"Lock queued for removal for {booking_date}")
 
         conn.commit()
+        note_zone_change()
 
         status = "activated" if is_active else "cancelled"
         return jsonify({"message": f"Booking {status} successfully"}), 200
