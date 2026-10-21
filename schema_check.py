@@ -23,6 +23,14 @@ OPTIONAL_COLUMNS = (
     "bookings.host_area",
     "admin_accounts.id",
     "admin_sessions.id",
+    "bookings.map_link",
+    "upasana_events.map_link",
+    "upasana_waitlist.id",
+    "bookings.attendance_count",
+    "upasana_events.attendance_count",
+    "bookings.attendance_expected",
+    "upasana_events.attendance_expected",
+    "upasana_waitlist.mahaprasad",
 )
 
 _present = set()
@@ -34,7 +42,7 @@ def refresh(engine):
         with engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT table_name || '.' || column_name FROM information_schema.columns "
-                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests', 'admin_accounts', 'admin_sessions')"
+                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests', 'admin_accounts', 'admin_sessions', 'upasana_events', 'upasana_waitlist')"
             )).all()
         _present = {r[0] for r in rows}
     except Exception as e:

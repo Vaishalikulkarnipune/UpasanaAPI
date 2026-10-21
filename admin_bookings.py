@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from model import db, Booking, User, UpasanaEvent
 from admin_auth import require_admin
+from booking_maps import clean_map_link, set_event_link, clear_booking_link, events_ready
 from upasana_settings import trial_is_active
 from Booking import (
     admin_create_booking,
@@ -42,6 +43,16 @@ router = Blueprint("admin_bookings", __name__)
 EVENT_TEXT_FIELDS = {"title": 200, "host_name": 150, "contact_number": 20, "address": 1000, "note": 1000}
 
 
+def _event_map_link(data):
+    """(given, link, error) for an optional `map_link` in an event request."""
+    if "map_link" not in data:
+        return False, None, None
+    if not events_ready():
+        return False, None, None          # column not there yet: ignore quietly
+    link, error = clean_map_link(data.get("map_link"))
+    return True, link, error
+
+
 def _parse_date(value):
     try:
         return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
@@ -50,6 +61,7 @@ def _parse_date(value):
 
 
 def event_to_dict(e):
+    from booking_maps import event_link
     return {
         "event_id": e.id,
         "event_date": e.event_date.strftime("%Y-%m-%d"),
@@ -60,6 +72,7 @@ def event_to_dict(e):
         "note": e.note or "",
         "mahaprasad": bool(e.mahaprasad),
         "is_active": bool(e.is_active),
+        "map_link": event_link(e.id),
     }
 
 
@@ -118,8 +131,27 @@ def admin_book():
         return jsonify({"error": "Member is required."}), 400
     if not data.get("booking_date"):
         return jsonify({"error": "Booking date is required."}), 400
+
+    # Giving a date to a member on the waitlist: Saturday or Sunday only; the entry is marked allocated
+    on_booked = None
+    if data.get("waitlist_id") not in (None, ""):
+        from waitlist import waitlist_entry_for_allocation, mark_allocated
+        try:
+            waitlist_id = int(data.get("waitlist_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid waitlist entry."}), 400
+        day = _parse_date(data["booking_date"])
+        if not day or day.weekday() not in (5, 6):
+            return jsonify({"error": "A waitlist allocation must be on a Saturday or Sunday."}), 400
+        entry, error = waitlist_entry_for_allocation(waitlist_id, user_id)
+        if error:
+            db.session.rollback()
+            return jsonify({"error": error}), 409
+        on_booked = lambda booking: mark_allocated(waitlist_id, booking.id, admin_label)
+
     return admin_create_booking(
-        user_id, data["booking_date"], data.get("mahaprasad", False), admin_label, is_trial=trial_is_active()
+        user_id, data["booking_date"], data.get("mahaprasad", False), admin_label,
+        is_trial=trial_is_active(), on_booked=on_booked,
     )
 
 
@@ -147,7 +179,11 @@ def create_event():
     if err:
         return err, status
 
-    values, error = _event_fields(request.get_json(silent=True) or {}, partial=False)
+    body = request.get_json(silent=True) or {}
+    values, error = _event_fields(body, partial=False)
+    if error:
+        return jsonify({"error": error}), 400
+    link_given, link, error = _event_map_link(body)
     if error:
         return jsonify({"error": error}), 400
 
@@ -158,6 +194,9 @@ def create_event():
             return jsonify({"error": SLOT_TAKEN_MSG}), 409
         event = UpasanaEvent(**values, is_active=True, created_by=admin_label)
         db.session.add(event)
+        db.session.flush()
+        if link_given:
+            set_event_link(event.id, link)
         db.session.commit()
         note_zone_change()
         logging.info(f"Admin {admin_label} created event {event.id} on {event.event_date}")
@@ -179,6 +218,9 @@ def update_event(event_id):
 
     data = request.get_json(silent=True) or {}
     values, error = _event_fields(data, partial=True)
+    if error:
+        return jsonify({"error": error}), 400
+    link_given, link, error = _event_map_link(data)
     if error:
         return jsonify({"error": error}), 400
 
@@ -208,6 +250,8 @@ def update_event(event_id):
         for field, value in values.items():
             setattr(event, field, value)
         event.is_active = True
+        if link_given:
+            set_event_link(event.id, link)
         db.session.commit()
         note_zone_change()
         logging.info(f"Admin {admin_label} updated event {event_id}")
@@ -400,6 +444,7 @@ def reassign_booking():
         _drop_cancelled_row(new_user.id, booking.booking_date)
         booking.user_id = new_user.id
         set_host_snapshot(booking, new_user)       # the new host's zone and area
+        clear_booking_link(booking.id)             # the map link pointed to the old host's place
         booking.booked_by_admin = True
         booking.updated_date = datetime.utcnow()
         db.session.commit()

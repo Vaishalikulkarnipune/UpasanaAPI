@@ -381,8 +381,11 @@ def create_booking(user_id, booking_date, mahaprasad=False, enable_zone_restrict
 # =======================================================
 # 🛡️ Admin booking on behalf of a member
 # =======================================================
-def admin_create_booking(user_id, booking_date, mahaprasad, admin_label, is_trial=False):
-    """Any date, no zone / weekday / one-per-year / blocked-date rules; the date must still be free."""
+def admin_create_booking(user_id, booking_date, mahaprasad, admin_label, is_trial=False, on_booked=None):
+    """
+    Any date, no zone / weekday / one-per-year / blocked-date rules; the date must still be free.
+    `on_booked(booking)` runs in the same transaction, after the booking row exists (e.g. waitlist).
+    """
     booking_date = _parse_date(booking_date)
     if not booking_date:
         return jsonify({"error": "Invalid date format. Use 'YYYY-MM-DD'."}), 400
@@ -422,6 +425,9 @@ def admin_create_booking(user_id, booking_date, mahaprasad, admin_label, is_tria
                 **host_snapshot(user),
             )
             db.session.add(booking)
+        if on_booked:
+            db.session.flush()
+            on_booked(booking)
         db.session.commit()
         note_zone_change()
         logging.info(f"Admin {admin_label} booked user={user.id} date={booking_date}")

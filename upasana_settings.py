@@ -107,6 +107,8 @@ def _all_settings():
     return {
         **booking,
         "show_booking_stats": _reference(BOOKING_STATS_KEY) != "false",
+        # Admin switch; members can join only while booking is also open (see waitlist.py)
+        "waitlist_open": _reference("waitlist_open") != "false",
         **get_opening_settings(booking["booking_year"]),
         **get_trial_settings(),
         "year_options": year_options(),
@@ -191,6 +193,9 @@ def update_settings():
         if "trial_run" in data:
             _set_reference(TRIAL_KEY, "true" if bool(data["trial_run"]) else "false")
 
+        if "waitlist_open" in data:
+            _set_reference("waitlist_open", "true" if bool(data["waitlist_open"]) else "false")
+
         # Dates are YYYY-MM-DD; an empty value clears the date.
         dates = {key: _reference(key) for key in TRIAL_DATE_KEYS}
         for key in TRIAL_DATE_KEYS:
@@ -231,7 +236,8 @@ def availability():
         if not year:
             return jsonify({"error": "Booking year configuration is missing."}), 500
         result = booking_availability(user, year, settings["enable_zone_restriction"])
-        return jsonify({**result, "booking_open": settings["enable_booking"]}), 200
+        from waitlist import member_summary
+        return jsonify({**result, "booking_open": settings["enable_booking"], "waitlist": member_summary(user)}), 200
     except Exception as e:
         logging.error(f"Error in availability: {e}")
         return jsonify({"error": "Failed to fetch availability"}), 500
