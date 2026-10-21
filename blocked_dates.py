@@ -5,9 +5,9 @@ Endpoints
 ─────────
   GET    /blocked-dates?year=YYYY            list blocked dates (year optional)
   POST   /admin/blocked-dates                block one or more dates
-         body: { dates: ["YYYY-MM-DD", ...], reason?, admin_mobile | admin_user_id }
+         body: { dates: ["YYYY-MM-DD", ...], reason?, admin login token }
   DELETE /admin/blocked-dates/<YYYY-MM-DD>   unblock a date
-         query: admin_mobile | admin_user_id
+         query: admin login token
 """
 
 import logging

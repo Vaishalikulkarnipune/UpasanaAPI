@@ -21,6 +21,8 @@ OPTIONAL_COLUMNS = (
     "profile_change_requests.id",
     "bookings.zone_code",
     "bookings.host_area",
+    "admin_accounts.id",
+    "admin_sessions.id",
 )
 
 _present = set()
@@ -32,7 +34,7 @@ def refresh(engine):
         with engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT table_name || '.' || column_name FROM information_schema.columns "
-                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests')"
+                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests', 'admin_accounts', 'admin_sessions')"
             )).all()
         _present = {r[0] for r in rows}
     except Exception as e:

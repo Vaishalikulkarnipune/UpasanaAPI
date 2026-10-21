@@ -3,7 +3,7 @@ Admin Upasana bookings: on behalf of a member, or a common event not tied to a m
 Admin bookings can be on any date and skip the member rules; a date still holds only
 one Upasana (member booking or event).
 
-Endpoints (all take admin_mobile | admin_user_id)
+Endpoints (all need the admin login token: Authorization: Bearer <token>)
 ─────────
   GET  /admin/members/lookup?mobile=XXXXXXXXXX   member details + their active bookings
   POST /admin/book                               { user_id, booking_date, mahaprasad }

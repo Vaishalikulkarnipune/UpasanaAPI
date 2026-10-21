@@ -1,5 +1,5 @@
 """
-Data for the admin dashboard tabs (all endpoints take admin_mobile | admin_user_id).
+Data for the admin dashboard tabs (all endpoints need the admin login token).
 
   GET /admin/members/attention     members whose zone is not set, and quick-registered
                                    members who have not completed their profile

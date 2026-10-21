@@ -8,7 +8,7 @@ dashboard can say that 2025 includes them.
 
 Endpoint
 ────────
-  GET /admin/user-stats    (admin_mobile | admin_user_id)
+  GET /admin/user-stats    (admin login token)
 """
 
 import logging

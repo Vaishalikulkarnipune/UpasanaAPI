@@ -9,7 +9,7 @@ Trial-run bookings are never stamped.
 
 Endpoint
 ────────
-  GET /admin/zone-completion    per-zone status for the booking year (admin_mobile | admin_user_id)
+  GET /admin/zone-completion    per-zone status for the booking year (admin login token)
 """
 
 import logging

@@ -42,6 +42,31 @@ def set_host_snapshot(booking, user):
         setattr(booking, field, value)
 
 
+FREEZE_SNAPSHOT_SQL = """
+    UPDATE bookings b
+       SET zone_code = COALESCE(b.zone_code, u.zone_code),
+           host_area = COALESCE(b.host_area, NULLIF(TRIM(u.area), ''))
+      FROM users u
+     WHERE u.id = b.user_id AND b.user_id = {param}
+       AND (b.zone_code IS NULL OR b.host_area IS NULL)
+"""
+
+
+def freeze_host_snapshot(cursor_or_none, user_id):
+    """
+    Call BEFORE a member's PIN/zone or address changes: bookings that have no saved zone or area
+    (made before the columns existed, or imported) get the member's current ones written in, so
+    the change does not move past Upasana to the new zone or area. Works with a raw cursor or the
+    ORM session; the caller commits.
+    """
+    if not (schema_check.has("bookings.zone_code") and schema_check.has("bookings.host_area")):
+        return
+    if cursor_or_none is not None:
+        cursor_or_none.execute(FREEZE_SNAPSHOT_SQL.format(param="%s"), (user_id,))
+    else:
+        db.session.execute(text(FREEZE_SNAPSHOT_SQL.format(param=":uid")), {"uid": user_id})
+
+
 def _trial_value(is_trial):
     """{"is_trial": ...} for a new Booking, or nothing when the column does not exist."""
     return {"is_trial": bool(is_trial)} if schema_check.has("bookings.is_trial") else {}

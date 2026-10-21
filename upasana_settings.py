@@ -7,7 +7,7 @@ Endpoints
   POST /upasana-settings                 admin: { booking_year?, enable_booking?, enable_zone_restriction?,
                                                   booking_opens_at?, trial_run?, trial_run_start?, trial_run_end?,
                                                   show_booking_stats?,
-                                                  admin_mobile | admin_user_id }
+                                                  admin login token }
   GET  /booking-availability?user_id=X   per-month availability for the user's zone in the booking year
 """
 

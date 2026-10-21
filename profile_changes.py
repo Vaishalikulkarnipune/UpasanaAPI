@@ -26,7 +26,7 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 
 from model import db, Booking, User
-from admin_auth import require_admin, SUPER_ADMIN_MOBILE
+from admin_auth import require_admin, admin_name_for
 import schema_check
 
 router = Blueprint("profile_changes", __name__)
@@ -85,8 +85,11 @@ def actor_label(user_id_or_mobile):
     value = str(user_id_or_mobile or "").strip()
     if not value:
         return "Unknown"
-    if value == SUPER_ADMIN_MOBILE:
+    if value == "Super admin":
         return "Super admin"
+    admin_name = admin_name_for(value)
+    if admin_name:
+        return "Super admin" if admin_name in ("Admin", "Super admin") else f"Super admin: {admin_name}"
     try:
         u = User.query.get(int(value))
     except (TypeError, ValueError):
@@ -158,6 +161,10 @@ def impact_of(user, changes):
 
 def apply_changes(user, changes, by_label):
     """Write approved changes to the member (zone follows the PIN code). Caller commits."""
+    if {"pincode", "area"} & set(changes):
+        # Past bookings keep the zone/area they were made under
+        from Booking import freeze_host_snapshot
+        freeze_host_snapshot(None, user.id)
     for field, value in changes.items():
         if field in MEMBER_FIELDS:
             setattr(user, field, value if value != "" else None)

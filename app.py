@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import psycopg2
 from model import db,Booking,User,FeatureToggle,ReferenceData,BookingLock,AdhikMaasSubmission,AdhikMaasArea,BlockedDate,UpasanaEvent
-from Booking import create_booking, reactivate_booking, note_zone_change
+from Booking import create_booking, reactivate_booking, note_zone_change, freeze_host_snapshot
 from datetime import datetime
 from sqlalchemy import text
 from config import get_db_connection, release_db_connection,Config
@@ -19,6 +19,7 @@ from zone_completion import router as zone_completion_bp
 from profile_changes import router as profile_changes_bp, SCHEMA as PROFILE_SCHEMA, mark_updated, actor_label, last_updated
 from user_stats import router as user_stats_bp
 from admin_dashboard import router as admin_dashboard_bp
+from admin_auth import router as admin_auth_bp, SCHEMA as ADMIN_SCHEMA, admin_login, member_admin_token, require_admin, current_admin, admin_required, admin_name_for
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,7 @@ app.register_blueprint(zone_completion_bp)
 app.register_blueprint(profile_changes_bp)
 app.register_blueprint(user_stats_bp)
 app.register_blueprint(admin_dashboard_bp)
+app.register_blueprint(admin_auth_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 
@@ -70,7 +72,7 @@ with app.app_context():
             table.create(bind=db.engine, checkfirst=True)
         except Exception as e:
             logging.warning(f"Could not ensure {table.name} table exists: {e}")
-    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA:
+    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA + ADMIN_SCHEMA:
         try:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
@@ -158,6 +160,7 @@ def get_registration_settings():
 
 
 @app.route('/registration-settings', methods=['POST'])
+@admin_required
 def update_registration_settings():
     try:
         data = request.get_json()
@@ -196,6 +199,7 @@ def get_adhik_maas_settings():
 
 
 @app.route('/adhik-maas-settings', methods=['POST'])
+@admin_required
 def update_adhik_maas_settings():
     try:
         data = request.get_json()
@@ -248,6 +252,7 @@ def get_home_settings():
 
 
 @app.route('/home-settings', methods=['POST'])
+@admin_required
 def update_home_settings():
     try:
         data = request.get_json()
@@ -414,7 +419,7 @@ def admin_quick_register():
     Admin: create a minimal user record (quick registration).
 
     Body (JSON):
-      admin_mobile | admin_user_id  – auth
+      Authorization: Bearer <admin token>  – auth
       first_name, last_name         – required
       mobile_number                 – required, 10 digits
       pincode                       – required, 6 digits (used to look up zone_code)
@@ -423,24 +428,12 @@ def admin_quick_register():
                state = "Maharashtra", is_quick_registered = TRUE
     """
     import os
-    SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
     data = request.get_json(silent=True) or {}
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
-    admin_mobile  = str(data.get("admin_mobile") or "").strip()
-    admin_user_id = data.get("admin_user_id")
-
-    if admin_mobile == SUPER_ADMIN_MOBILE:
-        pass
-    elif admin_user_id:
-        try:
-            admin = User.query.get(int(admin_user_id))
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid admin_user_id"}), 401
-        if not admin or not getattr(admin, "isadmin", False):
-            return jsonify({"error": "Admin access required"}), 403
-    else:
-        return jsonify({"error": "admin_mobile or admin_user_id required"}), 401
+    # ── Auth: admin session token ──────────────────────────────────────────────
+    err, status, _ = require_admin()
+    if err:
+        return err, status
 
     # ── Validate inputs ────────────────────────────────────────────────────────
     first_name    = str(data.get("first_name")    or "").strip()
@@ -625,30 +618,17 @@ def admin_reset_password():
     Admin: reset any user's password to a given value (default 123456).
 
     Body (JSON):
-      admin_mobile  | admin_user_id  – auth
+      Authorization: Bearer <admin token>  – auth
       mobile_number | user_id        – target user
       new_password                   – optional, defaults to "123456"
     """
     import os
-    SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
-
     data = request.get_json(silent=True) or {}
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
-    admin_mobile  = str(data.get("admin_mobile") or "").strip()
-    admin_user_id = data.get("admin_user_id")
-
-    if admin_mobile == SUPER_ADMIN_MOBILE:
-        pass  # super-admin always allowed
-    elif admin_user_id:
-        try:
-            admin = User.query.get(int(admin_user_id))
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid admin_user_id"}), 401
-        if not admin or not getattr(admin, "isadmin", False):
-            return jsonify({"error": "Admin access required"}), 403
-    else:
-        return jsonify({"error": "admin_mobile or admin_user_id required"}), 401
+    # ── Auth: admin session token ──────────────────────────────────────────────
+    err, status, _ = require_admin()
+    if err:
+        return err, status
 
     # ── Resolve target user ────────────────────────────────────────────────────
     mobile_number = str(data.get("mobile_number") or "").strip()
@@ -969,12 +949,16 @@ def get_booking_users_by_year():
                 bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
                 bookings.created_at, bookings.is_active,
                 bookings.updated_date, bookings.updated_by, users.isadmin,
-                users.zone_code, bookings.booked_by_admin, {trial}
+                {zone}, bookings.booked_by_admin, {trial}
             FROM users
             INNER JOIN bookings ON users.id = bookings.user_id
             WHERE EXTRACT(YEAR FROM bookings.booking_date) = %s
             ORDER BY bookings.booking_date ASC
-        """.format(trial="bookings.is_trial" if schema_check.has("bookings.is_trial") else "FALSE")
+        """.format(
+            trial="bookings.is_trial" if schema_check.has("bookings.is_trial") else "FALSE",
+            # The zone the booking counts for (saved on it), not where the member lives now
+            zone="COALESCE(bookings.zone_code, users.zone_code)" if schema_check.has("bookings.zone_code") else "users.zone_code",
+        )
 
         logging.debug(f"🧾 SQL Query: {query.strip()} | Params: {year}")
         cursor.execute(query, (year,))
@@ -1354,6 +1338,7 @@ def get_all_users():
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
+@admin_required
 def update_user(user_id):
     conn = None
     cursor = None
@@ -1389,6 +1374,10 @@ def update_user(user_id):
             updated_data['latitude'] = None
             updated_data['longitude'] = None
 
+        # Past bookings keep the zone/area they were made under
+        if {'pincode', 'area'} & set(updated_data):
+            freeze_host_snapshot(cursor, user_id)
+
         # Build the dynamic SQL update query
         set_clause = ', '.join([f"{key} = %s" for key in updated_data])
         values = list(updated_data.values())
@@ -1398,7 +1387,8 @@ def update_user(user_id):
         
         cursor.execute(update_query, values)
         # Who changed it: the app sends the logged-in admin's id (or the super-admin mobile)
-        mark_updated(cursor, user_id, actor_label(data.get('updated_by_user_id')))
+        admin = current_admin()
+        mark_updated(cursor, user_id, actor_label(admin.mobile_number) if admin else "Super admin")
         conn.commit()
         if 'zone_code' in updated_data:
             note_zone_change()      # a zone change can complete or reopen a zone
@@ -1424,6 +1414,7 @@ def update_user(user_id):
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
+@admin_required
 def delete_user(user_id):
     conn = None
     cursor = None
@@ -1560,6 +1551,12 @@ def login():
         if not mobile_number or not password:
             return jsonify({"error": "Mobile number and password are required"}), 400
 
+        # The admin account (admin_accounts, hashed password) logs in here too and gets a session token
+        admin_result = admin_login(mobile_number, password)
+        if admin_result is not None:
+            body, status = admin_result
+            return jsonify(body), status
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -1575,14 +1572,21 @@ def login():
 
             # Verify the password
             if stored_password == password:
-                return jsonify({
+                body = {
                     "message": "Login successful",
                     "user_id": user_id,
                     "zone_code": zone_code or "",
                     "force_password_change": bool(force_pwd_change),
                     # NULL for legacy users → treat as False
                     "is_quick_registered": bool(is_quick_reg) if is_quick_reg is not None else False,
-                }), 200
+                }
+                # Super admins (admin_accounts linked to this member) also get an admin session;
+                # the app asks whether to open the member view or the admin view.
+                if not body["force_password_change"] and not body["is_quick_registered"]:
+                    token = member_admin_token(user_id)
+                    if token:
+                        body.update({"can_admin": True, "admin_token": token})
+                return jsonify(body), 200
             else:
                 return jsonify({"error": "Invalid password"}), 401
         else:
@@ -1638,6 +1642,7 @@ def get_all_booked_dates():
         return jsonify({"error": "Failed to fetch booked dates"}), 500
 
 @app.route('/update_booking', methods=['POST'])
+@admin_required
 def update_booking():
     conn = None
     cursor = None

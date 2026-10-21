@@ -28,7 +28,6 @@ from flask import Blueprint, request, jsonify
 
 router = Blueprint("adhik_maas", __name__)
 
-SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
 
 # Kept as a last-resort fallback only; the real source of truth is the DB.
 _FALLBACK_AREAS: list[str] = []
@@ -56,23 +55,9 @@ def _get_area_lookup() -> dict[str, dict]:
 
 def _require_admin():
     """Return (error_response, status_code) if not admin, else (None, None)."""
-    from model import User
-    data = request.get_json(silent=True) or {}
-    admin_user_id = request.args.get("admin_user_id") or data.get("admin_user_id")
-    admin_mobile  = request.args.get("admin_mobile")  or data.get("admin_mobile")
-
-    if admin_mobile and str(admin_mobile).strip() == SUPER_ADMIN_MOBILE:
-        return None, None
-    if not admin_user_id:
-        return jsonify({"error": "admin_user_id or admin_mobile required"}), 401
-    try:
-        admin_user_id = int(admin_user_id)
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid admin_user_id"}), 401
-    user = User.query.get(admin_user_id)
-    if not user or not getattr(user, "isadmin", False):
-        return jsonify({"error": "Admin access required"}), 403
-    return None, None
+    from admin_auth import require_admin
+    err, status, _ = require_admin()
+    return err, status
 
 
 def _parse_seva_flags(seva_preference: str) -> dict:
@@ -874,7 +859,7 @@ def export_submissions():
       format   – 'csv' (default) or 'xlsx'
       status   – 'all' (default) | 'shortlisted' | 'finalized'
       search   – optional name / mobile / area substring filter
-      admin_user_id or admin_mobile – auth (same as all admin endpoints)
+      Authorization: Bearer <admin token> – auth (same as all admin endpoints)
     """
     err, status_code = _require_admin()
     if err is not None:
