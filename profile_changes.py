@@ -277,7 +277,7 @@ def submit_change_request(user_id):
 
 @router.route("/admin/change-requests", methods=["GET"])
 def pending_change_requests():
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     if not schema_check.has("profile_change_requests.id"):
@@ -295,7 +295,7 @@ def pending_change_requests():
 
 @router.route("/admin/change-requests/<int:request_id>/decide", methods=["POST"])
 def decide_change_request(request_id):
-    err, status, admin_label = require_admin()
+    err, status, admin_label = require_admin(legacy=False)
     if err:
         return err, status
     data = request.get_json(silent=True) or {}

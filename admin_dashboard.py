@@ -69,7 +69,7 @@ def _real_bookings(year=None):
 
 @router.route("/admin/members/attention", methods=["GET"])
 def members_attention():
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     try:
@@ -103,7 +103,7 @@ def _full_user(u):
 
 @router.route("/admin/booking-stats", methods=["GET"])
 def booking_stats():
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     try:
@@ -154,7 +154,7 @@ def booking_stats():
 
 @router.route("/admin/bookings/export", methods=["GET"])
 def export_bookings():
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     try:
@@ -262,7 +262,7 @@ def analysis():
     every area with its member count, and every member who has hosted, with the years.
     The app filters by year (all years or one year) and works out repeat hosts from this.
     """
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     try:

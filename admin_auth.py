@@ -14,6 +14,7 @@ Create or change the admin with:  python create_admin.py   (prints SQL, or --app
 
 import hashlib
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 
@@ -148,12 +149,61 @@ def current_admin():
     ).first()
 
 
-def require_admin():
-    """Return (error_response, status_code, admin_label) — error is None when authorised."""
+# ─── Older app versions (transition) ──────────────────────────────────────────
+# App versions released before admin logins (Play Store builds up to Oct 2026) do not send a
+# token: they identify the admin with admin_mobile / admin_user_id, and some admin endpoints sent
+# nothing at all. While LEGACY_ADMIN_AUTH is on (default), requests WITHOUT an Authorization header
+# are answered exactly as the API did before, so those apps keep working until every phone has
+# the new version (OTA). Turn it off with LEGACY_ADMIN_AUTH=0 once old versions are gone; the
+# log line "legacy admin request" shows whether any are still in use.
+LEGACY_ADMIN_AUTH = os.getenv("LEGACY_ADMIN_AUTH", "1").strip().lower() not in ("0", "false", "no", "off")
+LEGACY_SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
+
+
+def _legacy_request():
+    """True for a request from an older app version: legacy mode on and no Authorization header."""
+    return LEGACY_ADMIN_AUTH and not request.headers.get("Authorization")
+
+
+def _legacy_admin():
+    """The check the API used before admin logins. Returns (error, status, label)."""
+    from model import User
+
+    data = request.get_json(silent=True) or {}
+    admin_user_id = request.args.get("admin_user_id") or data.get("admin_user_id")
+    admin_mobile = request.args.get("admin_mobile") or data.get("admin_mobile")
+    if admin_mobile and str(admin_mobile).strip() == LEGACY_SUPER_ADMIN_MOBILE:
+        return None, None, LEGACY_SUPER_ADMIN_MOBILE
+    if not admin_user_id:
+        return jsonify({"error": "admin_user_id or admin_mobile required"}), 401, None
+    try:
+        admin_user_id = int(admin_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid admin_user_id"}), 401, None
+    user = User.query.get(admin_user_id)
+    if not user or not getattr(user, "isadmin", False):
+        return jsonify({"error": "Admin access required"}), 403, None
+    return None, None, str(admin_user_id)
+
+
+def _log_legacy():
+    logging.getLogger(__name__).info("legacy admin request: %s %s", request.method, request.path)
+
+
+def require_admin(legacy=True):
+    """
+    Return (error_response, status_code, admin_label) — error is None when authorised.
+    legacy=False for endpoints only the new app calls: a session token is then always required.
+    """
     admin = current_admin()
-    if admin is None:
-        return jsonify({"error": "Admin login required. Please log in again."}), 401, None
-    return None, None, admin.mobile_number
+    if admin is not None:
+        return None, None, admin.mobile_number
+    if legacy and _legacy_request():
+        err, status, label = _legacy_admin()
+        if err is None:
+            _log_legacy()
+        return err, status, label
+    return jsonify({"error": "Admin login required. Please log in again."}), 401, None
 
 
 def admin_name_for(value):
@@ -185,14 +235,28 @@ def admin_session():
     return jsonify({"valid": True, "name": admin.name}), 200
 
 
-def admin_required(view):
-    """Decorator: the endpoint answers only for a logged-in admin (valid session token)."""
+def admin_required(view=None, *, legacy_open=False):
+    """
+    Decorator: the endpoint answers only for a logged-in admin (valid session token).
+
+    Older app versions (no Authorization header, legacy mode on) are checked the way the API did
+    before: legacy_open=True for endpoints that had no admin check then (they stay open to those
+    versions), otherwise the admin_mobile / admin_user_id check. Endpoints that only the new app
+    calls leave legacy_open off.
+    """
     from functools import wraps
 
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        err, status, _ = require_admin()
-        if err:
-            return err, status
-        return view(*args, **kwargs)
-    return wrapper
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if legacy_open and current_admin() is None and _legacy_request():
+                _log_legacy()
+                return fn(*args, **kwargs)
+            # Endpoints that were open before: older apps keep using them; others need a token
+            err, status, _ = require_admin(legacy=legacy_open)
+            if err:
+                return err, status
+            return fn(*args, **kwargs)
+        return wrapper
+
+    return decorate(view) if view is not None else decorate

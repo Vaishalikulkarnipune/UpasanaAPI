@@ -114,7 +114,7 @@ def list_attendance():
 
 @router.route("/admin/attendance", methods=["POST"])
 def save_attendance():
-    err, status, admin_label = require_admin()
+    err, status, admin_label = require_admin(legacy=False)
     if err:
         return err, status
     if not ready():

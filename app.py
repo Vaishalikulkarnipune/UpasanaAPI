@@ -19,6 +19,10 @@ from zone_completion import router as zone_completion_bp
 from profile_changes import router as profile_changes_bp, SCHEMA as PROFILE_SCHEMA, mark_updated, actor_label, last_updated
 from user_stats import router as user_stats_bp
 from admin_dashboard import router as admin_dashboard_bp
+from booking_maps import router as booking_maps_bp, SCHEMA as MAP_SCHEMA, booking_links
+from waitlist import router as waitlist_bp, SCHEMA as WAITLIST_SCHEMA
+from attendance import router as attendance_bp, SCHEMA as ATTENDANCE_SCHEMA
+from year_report import router as year_report_bp
 from admin_auth import router as admin_auth_bp, SCHEMA as ADMIN_SCHEMA, admin_login, member_admin_token, require_admin, current_admin, admin_required, admin_name_for
 
 # Set up basic logging configuration
@@ -39,6 +43,10 @@ app.register_blueprint(profile_changes_bp)
 app.register_blueprint(user_stats_bp)
 app.register_blueprint(admin_dashboard_bp)
 app.register_blueprint(admin_auth_bp)
+app.register_blueprint(booking_maps_bp)
+app.register_blueprint(waitlist_bp)
+app.register_blueprint(attendance_bp)
+app.register_blueprint(year_report_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
 
@@ -72,7 +80,7 @@ with app.app_context():
             table.create(bind=db.engine, checkfirst=True)
         except Exception as e:
             logging.warning(f"Could not ensure {table.name} table exists: {e}")
-    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA + ADMIN_SCHEMA:
+    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA + ADMIN_SCHEMA + MAP_SCHEMA + WAITLIST_SCHEMA + ATTENDANCE_SCHEMA:
         try:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
@@ -160,7 +168,7 @@ def get_registration_settings():
 
 
 @app.route('/registration-settings', methods=['POST'])
-@admin_required
+@admin_required(legacy_open=True)
 def update_registration_settings():
     try:
         data = request.get_json()
@@ -199,7 +207,7 @@ def get_adhik_maas_settings():
 
 
 @app.route('/adhik-maas-settings', methods=['POST'])
-@admin_required
+@admin_required(legacy_open=True)
 def update_adhik_maas_settings():
     try:
         data = request.get_json()
@@ -252,7 +260,7 @@ def get_home_settings():
 
 
 @app.route('/home-settings', methods=['POST'])
-@admin_required
+@admin_required(legacy_open=True)
 def update_home_settings():
     try:
         data = request.get_json()
@@ -792,6 +800,16 @@ def get_user_and_booking_details(user_id):
             'unique_family_code': result[0][16],
         }
 
+        links = booking_links([row[17] for row in result])
+        # Where each Upasana was held (saved on the booking) and trial flag, for "My Upasana history"
+        extras = {}
+        if result:
+            cols = ", ".join([
+                "host_area" if schema_check.has("bookings.host_area") else "NULL",
+                "is_trial" if schema_check.has("bookings.is_trial") else "FALSE",
+            ])
+            cursor.execute(f"SELECT id, {cols} FROM bookings WHERE id = ANY(%s)", ([row[17] for row in result],))
+            extras = {r[0]: {"host_area": r[1], "is_trial": bool(r[2])} for r in cursor.fetchall()}
         bookings = [
             {
                 'booking_id': row[17],
@@ -799,7 +817,10 @@ def get_user_and_booking_details(user_id):
                 'mahaprasad': row[19],
                 'created_at': row[20],
                 'updated_date': row[21],
-                'updated_by': row[22]
+                'updated_by': row[22],
+                'map_link': links.get(row[17]),
+                'host_area': (extras.get(row[17]) or {}).get('host_area') or row[9] or '',
+                'is_trial': (extras.get(row[17]) or {}).get('is_trial', False),
             }
             for row in result
         ]
@@ -978,6 +999,7 @@ def get_booking_users_by_year():
             return jsonify({"message": f"No bookings found for year {year}"}), 404
 
         # Process results
+        links = booking_links([row[17] for row in result])
         users_with_bookings = {}
         for row in result:
             user_id = row[0]
@@ -1016,6 +1038,7 @@ def get_booking_users_by_year():
                 'user_id': user_id,
                 'booked_by_admin': bool(row[26]),
                 'is_trial': bool(row[27]),
+                'map_link': links.get(row[17]),
             })
 
         response_data = {'year': year, 'users': list(users_with_bookings.values()), 'events': events}
@@ -1338,7 +1361,7 @@ def get_all_users():
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
-@admin_required
+@admin_required(legacy_open=True)
 def update_user(user_id):
     conn = None
     cursor = None
@@ -1414,7 +1437,7 @@ def update_user(user_id):
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
-@admin_required
+@admin_required(legacy_open=True)
 def delete_user(user_id):
     conn = None
     cursor = None
@@ -1642,7 +1665,7 @@ def get_all_booked_dates():
         return jsonify({"error": "Failed to fetch booked dates"}), 500
 
 @app.route('/update_booking', methods=['POST'])
-@admin_required
+@admin_required(legacy_open=True)
 def update_booking():
     conn = None
     cursor = None

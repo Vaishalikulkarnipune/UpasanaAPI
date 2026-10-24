@@ -59,7 +59,7 @@ def record_zone_completion():
 
 @router.route("/admin/zone-completion", methods=["GET"])
 def zone_completion():
-    err, status, _ = require_admin()
+    err, status, _ = require_admin(legacy=False)
     if err:
         return err, status
     try:
