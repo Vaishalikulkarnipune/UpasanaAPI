@@ -1,18 +1,179 @@
+"""
+Admin login and the check every admin endpoint uses.
+
+Admin accounts live in the database (admin_accounts); nothing about them is in the app. Two kinds:
+  * standalone admin (user_id NULL): its own hashed password;
+  * super admin who is also a member (user_id set): logs in with their member mobile and
+    password; the app then asks whether to open the member view or the admin view. Logging in (POST /login with the admin's mobile and password) creates a session
+(admin_sessions) and returns a random token. The app sends it on every request as
+`Authorization: Bearer <token>`; require_admin() accepts a request only with a valid, unexpired
+session. Members flagged isadmin get no admin access.
+
+Create or change the admin with:  python create_admin.py   (prints SQL, or --apply)
+"""
+
+import hashlib
+import logging
 import os
-from flask import request, jsonify
-from model import User
+import secrets
+from datetime import datetime, timedelta
 
-SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
+from flask import Blueprint, jsonify, request
+from sqlalchemy import text
+from werkzeug.security import check_password_hash
+
+from model import db
+import schema_check
+
+router = Blueprint("admin_auth", __name__)
+
+SESSION_DAYS = 180
+IST = timedelta(hours=5, minutes=30)
+
+SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS admin_accounts (
+           id SERIAL PRIMARY KEY,
+           mobile_number VARCHAR(15) NOT NULL UNIQUE,
+           name VARCHAR(120) NOT NULL DEFAULT 'Admin',
+           password_hash TEXT,
+           user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+           is_active BOOLEAN NOT NULL DEFAULT TRUE,
+           created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')
+       )""",
+    """CREATE TABLE IF NOT EXISTS admin_sessions (
+           id SERIAL PRIMARY KEY,
+           admin_id INTEGER NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+           token_hash CHAR(64) NOT NULL UNIQUE,
+           created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata'),
+           expires_at TIMESTAMP NOT NULL
+       )""",
+    # Tables created before super admins could be members
+    "ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE",
+    "ALTER TABLE admin_accounts ALTER COLUMN password_hash DROP NOT NULL",
+]
 
 
-def require_admin():
-    """Return (error_response, status_code, admin_label) — error is None when authorised."""
+def _now_ist():
+    return datetime.utcnow() + IST
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _tables_ready():
+    return schema_check.has("admin_accounts.id") and schema_check.has("admin_sessions.id")
+
+
+def _bearer_token():
+    header = request.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip() or None
+    return None
+
+
+def find_admin_account(mobile):
+    """The active admin account for this mobile number, or None."""
+    if not _tables_ready() or not mobile:
+        return None
+    return db.session.execute(
+        text("SELECT id, mobile_number, name, password_hash, user_id FROM admin_accounts "
+             "WHERE mobile_number = :m AND is_active"),
+        {"m": str(mobile).strip()},
+    ).first()
+
+
+def _new_session(account):
+    token = secrets.token_urlsafe(32)
+    now = _now_ist()
+    db.session.execute(
+        text("INSERT INTO admin_sessions (admin_id, token_hash, created_at, expires_at) "
+             "VALUES (:a, :h, :c, :e)"),
+        {"a": account.id, "h": _hash_token(token), "c": now, "e": now + timedelta(days=SESSION_DAYS)},
+    )
+    # Housekeeping: drop expired sessions
+    db.session.execute(text("DELETE FROM admin_sessions WHERE expires_at < :n"), {"n": now})
+    db.session.commit()
+    logging.info(f"Admin {account.mobile_number} logged in")
+    return token
+
+
+def admin_login(mobile, password):
+    """
+    For POST /login, for a standalone admin account. None when this mobile is not one (member
+    login follows, see member_admin_token); otherwise (response_dict, status).
+    """
+    account = find_admin_account(mobile)
+    if account is None or account.user_id is not None:
+        return None
+    if not password or not account.password_hash or not check_password_hash(account.password_hash, password):
+        return {"error": "Invalid password"}, 401
+    token = _new_session(account)
+    return {
+        "message": "Login successful",
+        "role": "admin",
+        "user_id": "admin",
+        "admin_token": token,
+        "name": account.name,
+        "zone_code": "",
+        "force_password_change": False,
+        "is_quick_registered": False,
+    }, 200
+
+
+def member_admin_token(user_id):
+    """
+    After a member's password has been checked: a new admin session token when this member is a
+    super admin, else None. The app asks them which view to open.
+    """
+    if not _tables_ready():
+        return None
+    account = db.session.execute(
+        text("SELECT id, mobile_number, name, password_hash, user_id FROM admin_accounts "
+             "WHERE user_id = :u AND is_active"),
+        {"u": user_id},
+    ).first()
+    return _new_session(account) if account else None
+
+
+def current_admin():
+    """The admin account behind this request's token, or None."""
+    token = _bearer_token()
+    if not token or not _tables_ready():
+        return None
+    return db.session.execute(
+        text("SELECT a.id, a.mobile_number, a.name FROM admin_sessions s "
+             "JOIN admin_accounts a ON a.id = s.admin_id "
+             "WHERE s.token_hash = :h AND s.expires_at > :n AND a.is_active"),
+        {"h": _hash_token(token), "n": _now_ist()},
+    ).first()
+
+
+# ─── Older app versions (transition) ──────────────────────────────────────────
+# App versions released before admin logins (Play Store builds up to Oct 2026) do not send a
+# token: they identify the admin with admin_mobile / admin_user_id, and some admin endpoints sent
+# nothing at all. While LEGACY_ADMIN_AUTH is on (default), requests WITHOUT an Authorization header
+# are answered exactly as the API did before, so those apps keep working until every phone has
+# the new version (OTA). Turn it off with LEGACY_ADMIN_AUTH=0 once old versions are gone; the
+# log line "legacy admin request" shows whether any are still in use.
+LEGACY_ADMIN_AUTH = os.getenv("LEGACY_ADMIN_AUTH", "1").strip().lower() not in ("0", "false", "no", "off")
+LEGACY_SUPER_ADMIN_MOBILE = os.getenv("SUPER_ADMIN_MOBILE", "1234567890")
+
+
+def _legacy_request():
+    """True for a request from an older app version: legacy mode on and no Authorization header."""
+    return LEGACY_ADMIN_AUTH and not request.headers.get("Authorization")
+
+
+def _legacy_admin():
+    """The check the API used before admin logins. Returns (error, status, label)."""
+    from model import User
+
     data = request.get_json(silent=True) or {}
     admin_user_id = request.args.get("admin_user_id") or data.get("admin_user_id")
-    admin_mobile  = request.args.get("admin_mobile")  or data.get("admin_mobile")
-
-    if admin_mobile and str(admin_mobile).strip() == SUPER_ADMIN_MOBILE:
-        return None, None, SUPER_ADMIN_MOBILE
+    admin_mobile = request.args.get("admin_mobile") or data.get("admin_mobile")
+    if admin_mobile and str(admin_mobile).strip() == LEGACY_SUPER_ADMIN_MOBILE:
+        return None, None, LEGACY_SUPER_ADMIN_MOBILE
     if not admin_user_id:
         return jsonify({"error": "admin_user_id or admin_mobile required"}), 401, None
     try:
@@ -23,3 +184,79 @@ def require_admin():
     if not user or not getattr(user, "isadmin", False):
         return jsonify({"error": "Admin access required"}), 403, None
     return None, None, str(admin_user_id)
+
+
+def _log_legacy():
+    logging.getLogger(__name__).info("legacy admin request: %s %s", request.method, request.path)
+
+
+def require_admin(legacy=True):
+    """
+    Return (error_response, status_code, admin_label) — error is None when authorised.
+    legacy=False for endpoints only the new app calls: a session token is then always required.
+    """
+    admin = current_admin()
+    if admin is not None:
+        return None, None, admin.mobile_number
+    if legacy and _legacy_request():
+        err, status, label = _legacy_admin()
+        if err is None:
+            _log_legacy()
+        return err, status, label
+    return jsonify({"error": "Admin login required. Please log in again."}), 401, None
+
+
+def admin_name_for(value):
+    """The admin's name when a stored 'who did it' value is an admin account's mobile, else None."""
+    value = str(value or "").strip()
+    if not value or not _tables_ready():
+        return None
+    row = db.session.execute(
+        text("SELECT name FROM admin_accounts WHERE mobile_number = :m"), {"m": value}
+    ).first()
+    return row[0] if row else None
+
+
+@router.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    token = _bearer_token()
+    if token and _tables_ready():
+        db.session.execute(text("DELETE FROM admin_sessions WHERE token_hash = :h"), {"h": _hash_token(token)})
+        db.session.commit()
+    return jsonify({"message": "Logged out"}), 200
+
+
+@router.route("/admin/session", methods=["GET"])
+def admin_session():
+    """Lets the app check on start-up that its saved admin session is still valid."""
+    admin = current_admin()
+    if admin is None:
+        return jsonify({"valid": False}), 401
+    return jsonify({"valid": True, "name": admin.name}), 200
+
+
+def admin_required(view=None, *, legacy_open=False):
+    """
+    Decorator: the endpoint answers only for a logged-in admin (valid session token).
+
+    Older app versions (no Authorization header, legacy mode on) are checked the way the API did
+    before: legacy_open=True for endpoints that had no admin check then (they stay open to those
+    versions), otherwise the admin_mobile / admin_user_id check. Endpoints that only the new app
+    calls leave legacy_open off.
+    """
+    from functools import wraps
+
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if legacy_open and current_admin() is None and _legacy_request():
+                _log_legacy()
+                return fn(*args, **kwargs)
+            # Endpoints that were open before: older apps keep using them; others need a token
+            err, status, _ = require_admin(legacy=legacy_open)
+            if err:
+                return err, status
+            return fn(*args, **kwargs)
+        return wrapper
+
+    return decorate(view) if view is not None else decorate
