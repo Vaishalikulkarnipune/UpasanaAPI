@@ -2,8 +2,8 @@
 Attendance after an Upasana (admins only).
 
 Admins record how many people confirmed they would attend (expected) and roughly how many
-actually attended, with a short note, for a member booking or a common Upasana (event). It can be entered once the date has come and until 31 December of that
-year (IST); after that it is read-only. Only admins see it (Stats → Attendance, which can be shared
+actually attended, with a short note, for a member booking or a common Upasana (event). It can be entered or changed any time from the Upasana day on (no end date).
+Only admins see it (Stats → Attendance, which can be shared
 on WhatsApp, and the year-end report).
 
 Endpoints (admin login)
@@ -57,9 +57,8 @@ def _iso(ts):
 
 
 def editable(day):
-    """Attendance can be entered from the Upasana day until 31 December of its year."""
-    today = today_ist()
-    return day <= today <= date(day.year, 12, 31)
+    """Attendance can be entered or changed by an admin any time from the Upasana day on."""
+    return day <= today_ist()
 
 
 def _name(u):
@@ -153,8 +152,6 @@ def save_attendance():
         return jsonify({"error": "Upasana not found."}), 404
     if day > today_ist():
         return jsonify({"error": "Attendance can be entered on or after the Upasana date."}), 400
-    if not editable(day):
-        return jsonify({"error": f"Attendance for {day.year} can no longer be changed (only until 31 December {day.year})."}), 400
 
     from profile_changes import actor_label
     by = actor_label(admin_label)

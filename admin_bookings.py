@@ -444,7 +444,7 @@ def reassign_booking():
         _drop_cancelled_row(new_user.id, booking.booking_date)
         booking.user_id = new_user.id
         set_host_snapshot(booking, new_user)       # the new host's zone and area
-        clear_booking_link(booking.id)             # the map link pointed to the old host's place
+        clear_booking_link(booking.id)             # an older per-booking link pointed to the old host's place
         booking.booked_by_admin = True
         booking.updated_date = datetime.utcnow()
         db.session.commit()
