@@ -1518,6 +1518,9 @@ def get_user_by_id(user_id):
             joined = cursor.fetchone()[0]
             user_data['created_at'] = joined.strftime('%Y-%m-%dT%H:%M:%S+05:30') if joined else None
         user_data.update(last_updated(user_id))
+        if schema_check.has("users.map_link"):
+            cursor.execute("SELECT map_link FROM users WHERE id = %s", (user_id,))
+            user_data['map_link'] = cursor.fetchone()[0]
 
         return jsonify(user_data), 200
 

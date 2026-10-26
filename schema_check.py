@@ -24,6 +24,7 @@ OPTIONAL_COLUMNS = (
     "admin_accounts.id",
     "admin_sessions.id",
     "bookings.map_link",
+    "users.map_link",
     "upasana_events.map_link",
     "upasana_waitlist.id",
     "bookings.attendance_count",

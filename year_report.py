@@ -45,7 +45,7 @@ def _upasana_rows(year):
                u.mobile_number, CONCAT_WS(', ', NULLIF(TRIM(u.flat_no), ''), NULLIF(TRIM(u.full_address), ''),
                                           NULLIF(TRIM(u.landmark), '')),
                u.pincode, {zone}, {area},
-               {_col("bookings.map_link", "b.map_link")},
+               COALESCE({_col("users.map_link", "u.map_link")}, {_col("bookings.map_link", "b.map_link")}),
                {_col("bookings.attendance_expected", "b.attendance_expected")},
                {_col("bookings.attendance_count", "b.attendance_count")},
                {_col("bookings.attendance_note", "b.attendance_note")}
