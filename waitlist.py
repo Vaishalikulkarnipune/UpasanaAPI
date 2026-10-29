@@ -200,7 +200,32 @@ def member_summary(user):
     if entry_out and entry_out["status"] == "waiting":
         state["eligible"] = False
         state["reason"] = "on_waitlist"
+        entry_out.update(_queue_info(entry_out, user, state["year"]))
     return {**state, "entry": entry_out}
+
+
+def _queue_info(entry, user, year):
+    """For the member's waiting entry: their number in the zone's queue (same order as the admin
+    list: oldest first), how many are waiting in the zone, and how many times they have hosted
+    before this year (real Upasana, not trial)."""
+    zone = entry.get("zone_code") or user.zone_code or ""
+    queue = db.session.execute(
+        text("SELECT w.id FROM upasana_waitlist w JOIN users u ON u.id = w.user_id "
+             "WHERE w.year = :y AND w.status = 'waiting' AND COALESCE(NULLIF(w.zone_code, ''), u.zone_code, '') = :z "
+             "ORDER BY w.created_at, w.id"),
+        {"y": year, "z": zone},
+    ).scalars().all()
+    trial = "AND NOT is_trial" if schema_check.has("bookings.is_trial") else ""
+    hosted = db.session.execute(
+        text(f"SELECT COUNT(*) FROM bookings WHERE user_id = :u AND is_active {trial} "
+             f"AND booking_date < make_date(:y, 1, 1)"),
+        {"u": user.id, "y": year},
+    ).scalar() or 0
+    return {
+        "position": (queue.index(entry["id"]) + 1) if entry["id"] in queue else None,
+        "zone_waiting": len(queue),
+        "hosted_count": int(hosted),
+    }
 
 
 def _mahaprasad(data):

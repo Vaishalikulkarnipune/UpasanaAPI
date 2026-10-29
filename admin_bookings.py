@@ -5,7 +5,8 @@ one Upasana (member booking or event).
 
 Endpoints (all need the admin login token: Authorization: Bearer <token>)
 ─────────
-  GET  /admin/members/lookup?mobile=XXXXXXXXXX   member details + their active bookings
+  GET  /admin/members/lookup?mobile=XXXXXXXXXX[&user_id=N]   member details + their active bookings
+                                                (own mobile before alternate; user_id picks exactly)
   POST /admin/book                               { user_id, booking_date, mahaprasad }
   POST /admin/upasana-events                     { event_date, title, host_name?, contact_number?,
                                                    address?, note?, mahaprasad? }
@@ -86,9 +87,17 @@ def lookup_member():
     if len(digits) != 10:
         return jsonify({"error": "Enter a 10-digit mobile number."}), 400
 
-    user = User.query.filter(
-        (User.mobile_number == digits) | (User.alternate_mobile_number == digits)
-    ).first()
+    # Family members often share a number (one's mobile is another's alternate number):
+    # an exact member id (waitlist allocation) wins, then the member whose own mobile it is,
+    # and only then a member who has it as the alternate number.
+    user = None
+    user_id = request.args.get("user_id", type=int)
+    if user_id:
+        user = User.query.get(user_id)
+    if not user:
+        user = User.query.filter(User.mobile_number == digits).order_by(User.id).first()
+    if not user:
+        user = User.query.filter(User.alternate_mobile_number == digits).order_by(User.id).first()
     if not user:
         return jsonify({"error": "No member is registered with this mobile number."}), 404
 
@@ -376,7 +385,11 @@ def swap_bookings():
         return jsonify({"error": error}), 400
     if first.id == second.id:
         return jsonify({"error": "Choose two different bookings."}), 400
+    return _swap(first, second, admin_label)
 
+
+def _swap(first, second, admin_label):
+    """Exchange the dates of two upcoming member bookings (one transaction)."""
     date_a, date_b = first.booking_date, second.booking_date
     try:
         _lock_users_then_months([first.user_id, second.user_id], [date_a, date_b])
@@ -438,6 +451,19 @@ def reassign_booking():
         return jsonify({"error": "Member not found."}), 404
     if new_user.id == booking.user_id:
         return jsonify({"error": "This member is already the host."}), 400
+
+    # The new host already has an upcoming Upasana in the same year: exchange the two dates,
+    # so the current host gets that date instead of losing their Upasana.
+    theirs = (
+        Booking.query.filter(
+            Booking.user_id == new_user.id, Booking.is_active == True, Booking.id != booking.id,
+            Booking.booking_date >= today_ist(),
+            db.extract("year", Booking.booking_date) == booking.booking_date.year,
+        ).order_by(Booking.booking_date).first()
+    )
+    if theirs:
+        logging.info(f"Admin {admin_label}: change host of booking {booking.id} to user {new_user.id} -> swap with {theirs.id}")
+        return _swap(booking, theirs, admin_label)
 
     try:
         _lock_users_then_months([booking.user_id, new_user.id], [booking.booking_date])
