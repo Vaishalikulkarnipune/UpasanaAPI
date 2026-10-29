@@ -27,6 +27,8 @@ OPTIONAL_COLUMNS = (
     "users.map_link",
     "upasana_events.map_link",
     "upasana_waitlist.id",
+    "zone_coordinators.zone_code",
+    "upasana_day_notes.note_date",
     "bookings.attendance_count",
     "upasana_events.attendance_count",
     "bookings.attendance_expected",
@@ -43,7 +45,7 @@ def refresh(engine):
         with engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT table_name || '.' || column_name FROM information_schema.columns "
-                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests', 'admin_accounts', 'admin_sessions', 'upasana_events', 'upasana_waitlist')"
+                "WHERE table_name IN ('users', 'bookings', 'profile_change_requests', 'admin_accounts', 'admin_sessions', 'upasana_events', 'upasana_waitlist', 'zone_coordinators', 'upasana_day_notes')"
             )).all()
         _present = {r[0] for r in rows}
     except Exception as e:

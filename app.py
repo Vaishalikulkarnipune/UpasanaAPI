@@ -22,6 +22,8 @@ from admin_dashboard import router as admin_dashboard_bp
 from booking_maps import router as booking_maps_bp, SCHEMA as MAP_SCHEMA, booking_links
 from waitlist import router as waitlist_bp, SCHEMA as WAITLIST_SCHEMA
 from attendance import router as attendance_bp, SCHEMA as ATTENDANCE_SCHEMA
+from zone_coordinators import router as zone_coordinators_bp, SCHEMA as COORDINATOR_SCHEMA
+from day_notes import router as day_notes_bp, SCHEMA as DAY_NOTES_SCHEMA
 from year_report import router as year_report_bp
 from admin_auth import router as admin_auth_bp, SCHEMA as ADMIN_SCHEMA, admin_login, member_admin_token, require_admin, current_admin, admin_required, admin_name_for
 
@@ -46,6 +48,8 @@ app.register_blueprint(admin_auth_bp)
 app.register_blueprint(booking_maps_bp)
 app.register_blueprint(waitlist_bp)
 app.register_blueprint(attendance_bp)
+app.register_blueprint(zone_coordinators_bp)
+app.register_blueprint(day_notes_bp)
 app.register_blueprint(year_report_bp)
 # Initialize SQLAlchemy with app
 db.init_app(app)
@@ -80,7 +84,7 @@ with app.app_context():
             table.create(bind=db.engine, checkfirst=True)
         except Exception as e:
             logging.warning(f"Could not ensure {table.name} table exists: {e}")
-    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA + ADMIN_SCHEMA + MAP_SCHEMA + WAITLIST_SCHEMA + ATTENDANCE_SCHEMA:
+    for ddl in _BOOKING_INDEXES + PROFILE_SCHEMA + ADMIN_SCHEMA + MAP_SCHEMA + WAITLIST_SCHEMA + ATTENDANCE_SCHEMA + COORDINATOR_SCHEMA + DAY_NOTES_SCHEMA:
         try:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
