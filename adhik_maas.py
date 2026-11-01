@@ -25,6 +25,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+from admin_auth import archived
 
 router = Blueprint("adhik_maas", __name__)
 
@@ -562,6 +563,7 @@ def toggle_shortlist(submission_id):
 
 
 @router.route("/adhik-maas/shortlisted", methods=["GET"])
+@archived("adhik-maas-lists")
 def list_shortlisted():
     """[Admin] Return only shortlisted submissions."""
     err, status = _require_admin()
@@ -617,6 +619,7 @@ def toggle_finalize(submission_id):
 
 
 @router.route("/adhik-maas/finalized", methods=["GET"])
+@archived("adhik-maas-lists")
 def list_finalized():
     """[Admin] Return only finalized submissions."""
     err, status = _require_admin()
@@ -729,9 +732,11 @@ def update_seva_options():
       "shejarti":        true | false
     }
 
-    No admin auth check here — mirrors the pattern of /registration-settings
-    and /adhik-maas-settings; access is restricted at the app/UI level.
+    Admin only (session token).
     """
+    err, status = _require_admin()
+    if err:
+        return err, status
     from model import db, FeatureToggle
 
     data    = request.get_json(force=True, silent=True) or {}
@@ -783,6 +788,7 @@ def _geocode_address(address):
 
 
 @router.route("/adhik-maas/map-data", methods=["GET"])
+@archived("adhik-maas-lists")
 def get_map_data():
     """[Admin] Submissions with coordinates for map view."""
     err, status = _require_admin()

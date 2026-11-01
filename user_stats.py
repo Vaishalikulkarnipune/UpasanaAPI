@@ -37,7 +37,7 @@ def _count(sql, **params):
 
 @router.route("/admin/user-stats", methods=["GET"])
 def user_stats():
-    err, status, _ = require_admin(legacy=False)
+    err, status, _ = require_admin()
     if err:
         return err, status
     try:
