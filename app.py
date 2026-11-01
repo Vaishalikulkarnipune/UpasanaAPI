@@ -25,7 +25,7 @@ from attendance import router as attendance_bp, SCHEMA as ATTENDANCE_SCHEMA
 from zone_coordinators import router as zone_coordinators_bp, SCHEMA as COORDINATOR_SCHEMA
 from day_notes import router as day_notes_bp, SCHEMA as DAY_NOTES_SCHEMA
 from year_report import router as year_report_bp
-from admin_auth import router as admin_auth_bp, SCHEMA as ADMIN_SCHEMA, admin_login, member_admin_token, require_admin, current_admin, admin_required, admin_name_for
+from admin_auth import router as admin_auth_bp, SCHEMA as ADMIN_SCHEMA, admin_login, member_admin_token, require_admin, current_admin, admin_required, admin_name_for, archived
 
 # Set up basic logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -121,35 +121,6 @@ def get_reference_value(key):
     record = ReferenceData.query.filter_by(reference_key=key).first()
     return record.reference_value if record else None
 
-# Function to fetch app version metadata for Force Update
-@app.route('/app-metadata', methods=['GET'])
-def get_app_metadata():
-    """
-    Returns the minimum required version and latest version of the app.
-    This is used by the mobile app to check for forced updates.
-    """
-    try:
-        # Fetch values from your ReferenceData table
-        min_required = get_reference_value('min_required_version')
-        latest_version = get_reference_value('latest_version')
-        update_msg = get_reference_value('update_message')
-
-        # Fallback defaults if not found in database
-        return jsonify({
-            "minRequired": min_required if min_required else "2.0.2026.0",
-            "latestVersion": latest_version if latest_version else "2.0.2026.0",
-            "updateMessage": update_msg if update_msg else "A critical update is required to continue using the app."
-        }), 200
-
-    except Exception as e:
-        logging.error(f"Error in get_app_metadata: {str(e)}")
-        # If DB fails, return a safe default so the app doesn't crash
-        return jsonify({
-            "minRequired": "2.0.2026.0",
-            "latestVersion": "2.0.2026.0",
-            "updateMessage": "Please update your app to the latest version."
-        }), 200
-
 # Function to fetch the feature toggle
 def get_feature_toggle(toggle_name):
     """
@@ -172,7 +143,7 @@ def get_registration_settings():
 
 
 @app.route('/registration-settings', methods=['POST'])
-@admin_required(legacy_open=True)
+@admin_required
 def update_registration_settings():
     try:
         data = request.get_json()
@@ -211,7 +182,7 @@ def get_adhik_maas_settings():
 
 
 @app.route('/adhik-maas-settings', methods=['POST'])
-@admin_required(legacy_open=True)
+@admin_required
 def update_adhik_maas_settings():
     try:
         data = request.get_json()
@@ -264,7 +235,7 @@ def get_home_settings():
 
 
 @app.route('/home-settings', methods=['POST'])
-@admin_required(legacy_open=True)
+@admin_required
 def update_home_settings():
     try:
         data = request.get_json()
@@ -723,38 +694,6 @@ def book():
         logging.exception(f"Unexpected error in book: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
-# Get All Bookings for Admin 
-@app.route('/bookings', methods=['GET'])
-def get_all_bookings():
-    try:
-        # Fetch all bookings
-        bookings = Booking.query.all()
-        
-        # Convert booking data into a JSON-serializable format
-        booking_list = []
-        for booking in bookings:
-            booking_data = {
-                'id': booking.id,
-                'user_id': booking.user_id,
-                'booking_date': booking.booking_date.strftime('%Y-%m-%d'),
-                'zone_code': booking.zone,
-                'mahaprasad': booking.mahaprasad,
-                'created_at': booking.created_at.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            booking_list.append(booking_data)
-
-        return jsonify(booking_list), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-# Sunday Booking Route 
-@app.route('/sunday/book', methods=['POST'])
-def sunday_book():
-    """Legacy endpoint. Members book Saturdays only; other dates are booked by an admin."""
-    return jsonify({"error": "Sunday booking is not available. Please book a Saturday or contact the admin."}), 400
-
-
 @app.route('/bookings/user/<int:user_id>', methods=['GET'])
 def get_user_and_booking_details(user_id):
     conn = None
@@ -848,97 +787,6 @@ def get_user_and_booking_details(user_id):
             cursor.close()
         if conn is not None:
             release_db_connection(conn)
-
-#Fetch All Booking Members List
-@app.route('/bookings/users', methods=['GET'])
-def get_all_booking_users():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Query to get all users with their booking information
-        cursor.execute("""
-            SELECT 
-                users.id, users.first_name, users.middle_name, users.last_name, 
-                users.email, users.mobile_number, users.alternate_mobile_number, 
-                users.flat_no, users.full_address, users.area, users.landmark, 
-                users.city, users.state, users.pincode, users.anugrahit, 
-                users.gender, users.unique_family_code,
-                
-                bookings.id AS booking_id, bookings.booking_date, bookings.mahaprasad, 
-                bookings.created_at,bookings.is_active,
-                bookings.updated_date, bookings.updated_by,users.isadmin
-
-            FROM users
-            INNER JOIN bookings ON users.id = bookings.user_id
-                       order by booking_date asc
-        """)
-
-        result = cursor.fetchall()
-
-        if not result:
-            return jsonify({"message": "No users with bookings found"}), 404
-
-        # Structure data for JSON response
-        users_with_bookings = {}
-        for row in result:
-            user_id = row[0]
-            if user_id not in users_with_bookings:
-                # Add user data if not already in the dictionary
-                users_with_bookings[user_id] = {
-                    'id': user_id,
-                    'first_name': row[1],
-                    'middle_name': row[2],
-                    'last_name': row[3],
-                    'email': row[4],
-                    'mobile_number': row[5],
-                    'alternate_mobile_number': row[6],
-                    'flat_no': row[7],
-                    'full_address': row[8],
-                    'area': row[9],
-                    'landmark': row[10],
-                    'city': row[11],
-                    'state': row[12],
-                    'pincode': row[13],
-                    'anugrahit': row[14],
-                    'gender': row[15],
-                    'unique_family_code': row[16],
-                    'isadmin':row[24],
-                    'bookings': []
-                }
-            
-            # Append booking data to the user's bookings list
-            users_with_bookings[user_id]['bookings'].append({
-                'booking_id': row[17],
-                'booking_date': row[18],
-                'mahaprasad': row[19],
-                'created_at': row[20],
-                'is_active' : row[21],
-                'updated_date': row[22],
-                'updated_by': row[23],
-                'user_id':user_id
-            })
-
-        # Convert the dictionary to a list of users with bookings
-        response = {'users': list(users_with_bookings.values())}
-        
-        return jsonify(response), 200
-
-    except psycopg2.DatabaseError as db_err:
-        logging.error(f"Database error: {str(db_err)}")
-        return jsonify({"error": "Database error occurred"}), 500
-    except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return jsonify({"error": "An unexpected error occurred"}), 500
-    finally:
-         # Close cursor and connection if they are defined
-        if cursor is not None:
-            cursor.close()
-        if conn is not None:
-            release_db_connection(conn)
-
 
 @app.route('/bookings/users/by-year', methods=['POST'])
 def get_booking_users_by_year():
@@ -1066,98 +914,6 @@ def get_booking_users_by_year():
             logging.debug("🔓 Connection released.")
 
 
-
-# Sunday Booking Members List
-@app.route('/sunday_bookings/users', methods=['GET'])
-def get_all_sunday_booking_users():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Query to get all users with their Sunday booking information
-        cursor.execute("""
-            SELECT 
-                users.id, users.first_name, users.middle_name, users.last_name, 
-                users.email, users.mobile_number, users.alternate_mobile_number, 
-                users.flat_no, users.full_address, users.area, users.landmark, 
-                users.city, users.state, users.pincode, users.anugrahit, 
-                users.gender, users.unique_family_code, users.isadmin,
-
-                sunday_bookings.id AS booking_id, 
-                sunday_bookings.booking_date, 
-                sunday_bookings.mahaprasad, 
-                sunday_bookings.created_at,
-                sunday_bookings.is_active,
-                sunday_bookings.updated_at, 
-                sunday_bookings.updated_by
-
-            FROM users
-            INNER JOIN sunday_bookings ON users.id = sunday_bookings.user_id
-            ORDER BY sunday_bookings.booking_date ASC
-        """)
-
-        result = cursor.fetchall()
-
-        if not result:
-            return jsonify({"message": "No users with Sunday bookings found"}), 404
-
-        # Structure data for JSON response
-        users_with_sunday_bookings = {}
-        for row in result:
-            user_id = row[0]
-            if user_id not in users_with_sunday_bookings:
-                users_with_sunday_bookings[user_id] = {
-                    'id': user_id,
-                    'first_name': row[1],
-                    'middle_name': row[2],
-                    'last_name': row[3],
-                    'email': row[4],
-                    'mobile_number': row[5],
-                    'alternate_mobile_number': row[6],
-                    'flat_no': row[7],
-                    'full_address': row[8],
-                    'area': row[9],
-                    'landmark': row[10],
-                    'city': row[11],
-                    'state': row[12],
-                    'pincode': row[13],
-                    'anugrahit': row[14],
-                    'gender': row[15],
-                    'unique_family_code': row[16],
-                    'isadmin': row[17],
-                    'bookings': []
-                }
-
-            # Append Sunday booking info
-            users_with_sunday_bookings[user_id]['bookings'].append({
-                'booking_id': row[18],
-                'booking_date': row[19],
-                'mahaprasad': row[20],
-                'created_at': row[21],
-                'is_active': row[22],
-                'updated_at': row[23],
-                'updated_by': row[24],
-                'user_id': user_id
-            })
-
-        # Convert the dictionary to a list for JSON output
-        response = {'users': list(users_with_sunday_bookings.values())}
-        
-        return jsonify(response), 200
-
-    except psycopg2.DatabaseError as db_err:
-        logging.error(f"Database error: {str(db_err)}")
-        return jsonify({"error": "Database error occurred"}), 500
-    except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return jsonify({"error": "An unexpected error occurred"}), 500
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if conn is not None:
-            release_db_connection(conn)
 
 # Step 2: API route for inserting data into users table
 @app.route('/register', methods=['POST'])
@@ -1293,8 +1049,9 @@ def get_zones():
             release_db_connection(conn)
 
 
-# Step 2: API route for fetching all users
+# Step 2: API route for fetching all users (admin only: it holds every member's address)
 @app.route('/users', methods=['GET'])
+@admin_required
 def get_all_users():
     conn = None
     cursor = None
@@ -1365,7 +1122,7 @@ def get_all_users():
 
 # PUT Route to update a user's data
 @app.route('/users/<int:user_id>', methods=['PUT'])
-@admin_required(legacy_open=True)
+@admin_required
 def update_user(user_id):
     conn = None
     cursor = None
@@ -1441,7 +1198,8 @@ def update_user(user_id):
 
 # DELETE Route to delete a user by ID
 @app.route('/users/<int:user_id>', methods=['DELETE'])
-@admin_required(legacy_open=True)
+@archived("delete-member")
+@admin_required
 def delete_user(user_id):
     conn = None
     cursor = None
@@ -1541,30 +1299,6 @@ def get_user_by_id(user_id):
         if conn is not None:
             release_db_connection(conn)
 
-# Example route to get bookings with user details
-@app.route('/bookings-with-users', methods=['GET'])
-def get_bookings_with_users():
-    try:
-        results = (
-            db.session.query(Booking, User)
-            .join(User, User.id == Booking.user_id)
-            .all()
-        )
-        bookings_with_users = [
-            {
-                "booking_date": booking.booking_date,
-                "zone": booking.zone,
-                "user_first_name": user.first_name,
-                "user_last_name": user.last_name,
-                "user_member_id": user.id
-            }
-            for booking, user in results
-        ]
-        return jsonify(bookings_with_users), 200
-    except Exception as e:
-        logging.error(f"Error in get_bookings_with_users: {e}")
-        return jsonify({"error": "Failed to fetch bookings with users"}), 500
-
 # User login route
 @app.route('/login', methods=['POST'])
 def login():
@@ -1635,8 +1369,9 @@ def login():
         if conn is not None:
             release_db_connection(conn)
 
-#get total users and bookings                   
+#get total users and bookings (admin dashboard only)
 @app.route('/upasanaUsersSummary', methods=['GET'])
+@admin_required
 def upasanaUsersSummary():
     try:
         total_users            = User.query.count()
@@ -1672,7 +1407,8 @@ def get_all_booked_dates():
         return jsonify({"error": "Failed to fetch booked dates"}), 500
 
 @app.route('/update_booking', methods=['POST'])
-@admin_required(legacy_open=True)
+@archived("edit-booking")
+@admin_required
 def update_booking():
     conn = None
     cursor = None

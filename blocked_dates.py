@@ -16,7 +16,7 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from model import db, BlockedDate
-from admin_auth import require_admin
+from admin_auth import require_admin, archived
 from Booking import lock_month, taken_dates, note_zone_change
 
 router = Blueprint("blocked_dates", __name__)
@@ -39,6 +39,7 @@ def _to_dict(b):
 
 
 @router.route("/blocked-dates", methods=["GET"])
+@archived("blocked-dates-list")
 def list_blocked_dates():
     try:
         query = BlockedDate.query

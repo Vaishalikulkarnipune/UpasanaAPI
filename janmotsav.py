@@ -1,4 +1,4 @@
-from admin_auth import admin_required
+from admin_auth import admin_required, archived
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from model import (
@@ -153,6 +153,7 @@ def save_attendance():
 # SAVE ATTENDANCE + SEVA NIDHI
 # ==========================================================
 @router.post("/janmotsav/attendance/v1/save")
+@archived("janmotsav-admin")
 def save_attendance_v1():
     print("========== SAVE ATTENDANCE API CALLED ==========")
 
@@ -280,7 +281,8 @@ def save_attendance_v1():
 # ADMIN: CREATE / UPDATE YEAR (MAINTENANCE)
 # ==========================================================
 @router.post("/janmotsav/admin/year/create")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def create_or_update_year():
     return jsonify({
         "status": "error",
@@ -292,7 +294,8 @@ def create_or_update_year():
 # ADMIN: ADD DAYS TO YEAR (MAINTENANCE)
 # ==========================================================
 @router.post("/janmotsav/admin/days/add")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def add_days():
     return jsonify({
         "status": "error",
@@ -302,7 +305,8 @@ def add_days():
 # ADMIN: CREATE / UPDATE YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/year/createOLD")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def create_or_update_year_old():
     data = request.json
     year_id = data.get("id")
@@ -361,7 +365,8 @@ def create_or_update_year_old():
 # ADMIN: ADD DAYS TO YEAR
 # ==========================================================
 @router.post("/janmotsav/admin/days/addOLD")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def add_days_old():
     data = request.json
     year_id = data["year_id"]
@@ -493,7 +498,8 @@ def attendance_summary_all():
 # LIST YEARS (ADMIN)
 # ==========================================================
 @router.get("/janmotsav/admin/year/list")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def list_years():
     years = (
         JanmotsavYear.query
@@ -518,7 +524,8 @@ def list_years():
 # GET YEAR DETAILS (ADMIN)
 # ==========================================================
 @router.get("/janmotsav/admin/year/<int:year_id>")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def get_year_details(year_id):
     year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
 
@@ -562,7 +569,8 @@ def get_year_details(year_id):
 # DELETE YEAR (SOFT DELETE)
 # ==========================================================
 @router.delete("/janmotsav/admin/year/delete/<int:year_id>")
-@admin_required(legacy_open=True)
+@archived("janmotsav-admin")
+@admin_required
 def delete_year(year_id):
     year = JanmotsavYear.query.filter_by(id=year_id, is_deleted=False).first()
 
